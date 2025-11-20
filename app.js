@@ -17,6 +17,13 @@ app.use(express.static('public'));
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 
+// Request logging middleware
+app.use((req, res, next) => {
+  const timestamp = new Date().toISOString();
+  console.log(`[${timestamp}] ${req.method} ${req.path}`);
+  next();
+});
+
 // Hardcoded risks
 const RISKY_COMBINATIONS = [
   ['aspirin', 'amlodipine'],
@@ -33,7 +40,8 @@ let mockData = {
     { id: 1, full_name: "Jane Doe", allergies: ["penicillin"] }
   ],
   encounters: [],
-  medications: []
+  medications: [],
+  nextMedicationId: 1
 };
 
 // Helper: auth headers
@@ -52,186 +60,384 @@ const mockResponseFor = (endpoint, method, data) => {
   }
   if (endpoint.match(/^\/v1\/patients\/\d+\/medications/) && method === 'GET') {
     const id = parseInt(endpoint.split('/')[3]);
-    return { results: mockData.medications.filter(m => m.patient_id === id) };
+    return { results: mockData.medications.filter(m => m.patient === id) };
   }
   if (endpoint === '/v1/ai/patient' && method === 'POST') {
     const newId = mockData.patients.length + 1;
     const prompt = (data?.prompt || '').toLowerCase();
-    const allergies = prompt.includes('allergic to penicillin') ? ['penicillin'] : [];
-    const created = { id: newId, full_name: `Patient ${newId}`, allergies };
+    
+    // Extract patient name
+    let fullName = `Patient ${newId}`;
+    const nameMatch = prompt.match(/new patient\s+([a-zA-Z\s]+?)(?:,|$)/i);
+    if (nameMatch) {
+      fullName = nameMatch[1].trim();
+    }
+    
+    // Extract allergies
+    const allergies = [];
+    const allergyMatch = prompt.match(/allergic to\s+([a-zA-Z\s,]+?)(?:\.|$)/i);
+    if (allergyMatch) {
+      const allergyList = allergyMatch[1].split(',').map(a => a.trim()).filter(Boolean);
+      allergies.push(...allergyList);
+    }
+    
+    const created = { id: newId, full_name: fullName, allergies };
     mockData.patients.push(created);
     return { status: true, id: newId };
+  }
+  if (endpoint === '/v1/patients/create' && method === 'POST') {
+    const newId = mockData.patients.length + 1;
+    const created = { 
+      id: newId, 
+      full_name: data?.full_name || `Patient ${newId}`, 
+      allergies: data?.allergies || [] 
+    };
+    mockData.patients.push(created);
+    return { status: true, status_code: 201, id: newId };
   }
   if (endpoint === '/v1/ai/emr' && method === 'POST') {
     const patientId = parseInt(data?.patient) || null;
     const summary = (data?.prompt || '').substring(0, 140);
-    const created = { id: mockData.encounters.length + 1, created_at: new Date().toISOString(), summary, patient: patientId, encounter_medications: [] };
-    if ((data.prompt || '').toLowerCase().includes('aspirin')) mockData.medications.push({ name: 'Aspirin', patient_id: patientId });
-    if ((data.prompt || '').toLowerCase().includes('amlodipine')) mockData.medications.push({ name: 'Amlodipine', patient_id: patientId });
-    if ((data.prompt || '').toLowerCase().includes('amoxicillin')) mockData.medications.push({ name: 'Amoxicillin', patient_id: patientId });
+    const created = { 
+      id: mockData.encounters.length + 1, 
+      created_at: new Date().toISOString(), 
+      summary, 
+      patient: patientId, 
+      diagnosis: 'Clinical consultation'
+    };
+    
+    // Parse medications from prompt and add them
+    const promptLower = (data.prompt || '').toLowerCase();
+    if (promptLower.includes('aspirin')) {
+      mockData.medications.push({ 
+        id: mockData.nextMedicationId++,
+        name: 'Aspirin', 
+        patient: patientId,
+        dose: '500mg',
+        created_at: new Date().toISOString()
+      });
+    }
+    if (promptLower.includes('amlodipine')) {
+      mockData.medications.push({ 
+        id: mockData.nextMedicationId++,
+        name: 'Amlodipine', 
+        patient: patientId,
+        dose: '5mg',
+        created_at: new Date().toISOString()
+      });
+    }
+    if (promptLower.includes('amoxicillin')) {
+      mockData.medications.push({ 
+        id: mockData.nextMedicationId++,
+        name: 'Amoxicillin', 
+        patient: patientId,
+        dose: '250mg',
+        created_at: new Date().toISOString()
+      });
+    }
+    
     mockData.encounters.push(created);
     return { status: true, id: created.id };
   }
   return {};
 };
 
-// Safe API call
+// Safe API call with better error handling
 const apiCall = async (endpoint, method='GET', data=null) => {
-  if (MOCK_API) return mockResponseFor(endpoint, method, data);
+  if (MOCK_API) {
+    console.log(`[MOCK MODE] ${method} ${endpoint}`);
+    return mockResponseFor(endpoint, method, data);
+  }
   try {
     const url = `${BASE_URL}${endpoint}`;
+    console.log(`[API CALL] ${method} ${url}`);
     const resp = await axios({ method, url, headers: { ...authHeaders(), 'Content-Type':'application/json' }, data });
     return resp.data;
   } catch (err) {
-    console.error('API Error:', err.response?.data || err.message);
+    console.error(`[API ERROR] ${method} ${endpoint}:`, err.response?.data || err.message);
+    console.log('[FALLBACK] Using mock data due to API error');
     return mockResponseFor(endpoint, method, data);
   }
 };
 
-// Compute alerts
+// Compute alerts with improved medication matching
 const computeAlerts = async (patientId, meds=[], patient={}) => {
   const alerts = [];
   const allergies = patient.allergies || [];
+  
+  console.log(`[ALERT CHECK] Patient ${patientId}:`, {
+    allergies,
+    medications: meds.map(m => m.name)
+  });
+  
+  // Check for allergy risks
   allergies.forEach(allergy => {
     meds.forEach(med => {
       const medName = (med.name || '').toLowerCase();
-      if (allergy && medName.includes(allergy.toLowerCase())) alerts.push({ type:'ALLERGY RISK', message:`Patient is allergic to ${allergy}!`, risk:'High' });
+      const allergyLower = allergy.toLowerCase();
+      // Check if medication name contains the allergy or vice versa
+      if (medName.includes(allergyLower) || allergyLower.includes(medName.split(' ')[0])) {
+        alerts.push({ 
+          type:'ALLERGY RISK', 
+          message:`Patient is allergic to ${allergy}! Prescribed medication: ${med.name}`, 
+          risk:'High' 
+        });
+      }
     });
   });
-  RISKY_COMBINATIONS.forEach(([a,b])=>{
-    const hasA = meds.some(m=>m.name.toLowerCase().includes(a));
-    const hasB = meds.some(m=>m.name.toLowerCase().includes(b));
-    if(hasA && hasB) alerts.push({ type:'DRUG INTERACTION', message:`${a} + ${b} = Serious risk`, risk:'High' });
+  
+  // Check for drug interactions
+  RISKY_COMBINATIONS.forEach(([drugA, drugB]) => {
+    const hasA = meds.some(m => {
+      const name = m.name.toLowerCase();
+      return name.includes(drugA) || drugA.includes(name.split(' ')[0]);
+    });
+    const hasB = meds.some(m => {
+      const name = m.name.toLowerCase();
+      return name.includes(drugB) || drugB.includes(name.split(' ')[0]);
+    });
+    
+    if (hasA && hasB) {
+      alerts.push({ 
+        type:'DRUG INTERACTION', 
+        message:`${drugA.toUpperCase()} + ${drugB.toUpperCase()} = Serious interaction risk`, 
+        risk:'High' 
+      });
+    }
   });
+  
+  console.log(`[ALERT RESULT] ${alerts.length} alerts detected`);
+  
   return alerts;
 };
 
 // Routes
 
 // Home - list patients
-app.get('/', async (req,res)=>{
-  const patients = (await apiCall('/v1/ai/patients')).results || [];
-  res.render('index', { patients, dashboard: null });
+app.get('/', async (req, res) => {
+  try {
+    const patientsData = await apiCall('/v1/patients');
+    const patients = patientsData.results || [];
+    res.render('index', { patients, dashboard: null });
+  } catch (error) {
+    console.error('[ERROR] Failed to fetch patients:', error.message);
+    res.status(500).render('index', { 
+      patients: [], 
+      dashboard: null, 
+      error: 'Failed to load patients' 
+    });
+  }
 });
 
-// // Create patient
-// app.post('/create-patient', async (req,res)=>{
-//   const prompt = req.body.prompt;
-//   const r = await apiCall('/v1/ai/patient','POST',{ prompt });
-//   res.json({ success:true, patientId:r.id });
-// });
-
+// Create patient with validation and proper error handling
 app.post('/create-patient', async (req, res) => {
-  const prompt = (req.body.prompt || '').toString();
-  global.lastPrompt = prompt;
-
-  // Helper to call standard create (non-AI)
-  const standardCreate = async (derived) => {
-    // derived should be an object matching minimal required fields.
-    // docs require first_name; include full_name if available
-    try {
-      const r = await apiCall('/v1/patients/create', 'POST', derived);
-      // docs return { status: true, status_code: 201, id: 67 } — adapt if API responds differently
-      return r?.id || (r?.status === true && r?.id) || null;
-    } catch (e) {
-      console.error('Standard create failed:', e?.message || e);
-      return null;
-    }
-  };
-
   try {
+    // Validate input
+    const prompt = (req.body.prompt || '').toString().trim();
+    if (!prompt) {
+      return res.status(400).json({ success: false, error: 'Prompt is required' });
+    }
+
+    // Helper to call standard create (non-AI)
+    const standardCreate = async (derived) => {
+      try {
+        const r = await apiCall('/v1/patients/create', 'POST', derived);
+        return r?.id || (r?.status === true && r?.id) || null;
+      } catch (e) {
+        console.error('[ERROR] Standard create failed:', e?.message || e);
+        return null;
+      }
+    };
+
     // 1) Try AI endpoint first (preferred)
-    console.log('Attempting AI patient create with prompt:', prompt);
+    console.log('[CREATE PATIENT] Attempting AI patient create with prompt:', prompt);
     const aiResp = await apiCall('/v1/ai/patient', 'POST', { prompt });
 
-    // AI may return { status:true, id: 67 } or similar
     const aiId = aiResp?.id || (aiResp?.status === true && aiResp?.id) || null;
     if (aiId) {
+      console.log('[SUCCESS] Patient created via AI endpoint, ID:', aiId);
       return res.json({ success: true, patientId: aiId });
     }
 
-    // If AI returned but no id, fall through to standard create
-    console.warn('AI create returned but no id, falling back to standard create', aiResp);
-  } catch (err) {
-    console.warn('AI create failed (will attempt standard create). Error:', err.message || err);
-  }
+    console.log('[FALLBACK] AI create returned but no id, falling back to standard create');
 
-  // 2) Attempt regular create endpoint as fallback
-  // Build a minimal body from prompt. This is heuristic: you can improve parsing if you want
-  const derived = {
-    first_name: 'New',                // required by docs — change parsing to extract real name if possible
-    full_name: prompt.substring(0, 200),
-    allergies: []
-  };
+    // 2) Attempt regular create endpoint as fallback
+    const derived = {
+      first_name: 'New',
+      full_name: prompt.substring(0, 200),
+      allergies: []
+    };
 
-  // quick parse: look for "allergic to X" in the prompt (basic heuristic)
-  const m = prompt.toLowerCase().match(/allergic to ([a-zA-Z, ]+)/);
-  if (m) {
-    const list = m[1].split(',').map(s => s.trim()).filter(Boolean);
-    if (list.length) derived.allergies = list;
-    if (list.length && derived.full_name === prompt.substring(0,200)) {
-      // try to set a better full_name (optional)
-      // if prompt includes "New patient John Doe", extract after "New patient"
+    // Parse allergies from prompt
+    const allergyMatch = prompt.toLowerCase().match(/allergic to ([a-zA-Z, ]+)/);
+    if (allergyMatch) {
+      const list = allergyMatch[1].split(',').map(s => s.trim()).filter(Boolean);
+      if (list.length) derived.allergies = list;
+      
+      // Try to extract patient name
       const nameMatch = prompt.match(/new patient\s+([A-Za-z\s]+)/i);
-      if (nameMatch) derived.first_name = nameMatch[1].split(' ')[0] || 'New';
-      derived.full_name = (nameMatch ? nameMatch[1].trim() : derived.full_name).substring(0,200);
+      if (nameMatch) {
+        const fullName = nameMatch[1].trim();
+        derived.first_name = fullName.split(' ')[0] || 'New';
+        derived.full_name = fullName.substring(0, 200);
+      }
     }
+
+    const stdId = await standardCreate(derived);
+    if (stdId) {
+      console.log('[SUCCESS] Patient created via standard endpoint, ID:', stdId);
+      return res.json({ success: true, patientId: stdId });
+    }
+
+    // 3) Last resort: mock fallback
+    if (MOCK_API) {
+      const mResp = mockResponseFor('/v1/ai/patient', 'POST', { prompt });
+      const id = mResp?.id || null;
+      if (id) {
+        console.log('[SUCCESS] Patient created via mock, ID:', id);
+        return res.json({ success: true, patientId: id });
+      }
+    }
+
+    // If everything failed
+    console.error('[ERROR] All patient creation methods failed');
+    return res.status(500).json({ 
+      success: false, 
+      error: 'Failed to create patient. Please try again.' 
+    });
+  } catch (error) {
+    console.error('[ERROR] Exception in create-patient:', error.message);
+    return res.status(500).json({ 
+      success: false, 
+      error: 'An unexpected error occurred' 
+    });
   }
+});
+// Dashboard with comprehensive error handling
+app.get('/dashboard/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    
+    if (isNaN(id)) {
+      return res.status(400).render('index', { 
+        patients: [], 
+        dashboard: null, 
+        error: 'Invalid patient ID' 
+      });
+    }
 
-  const stdId = await standardCreate(derived);
-  if (stdId) return res.json({ success: true, patientId: stdId });
-
-  // 3) Last resort: mock fallback (so UI remains functional)
-  if (MOCK_API) {
-    // mockResponseFor handles adding patient to in-memory store
-    const mResp = mockResponseFor('/v1/ai/patient', 'POST', { prompt });
-    const id = mResp?.id || null;
-    if (id) return res.json({ success: true, patientId: id });
+    const [patient, encountersData, medicationsData] = await Promise.all([
+      apiCall(`/v1/patients/${id}`),
+      apiCall(`/v1/patients/${id}/encounters`),
+      apiCall(`/v1/patients/${id}/medications`)
+    ]);
+    
+    if (!patient || !patient.id) {
+      return res.status(404).render('index', { 
+        patients: [], 
+        dashboard: null, 
+        error: 'Patient not found' 
+      });
+    }
+    
+    const encounters = encountersData.results || [];
+    const medications = medicationsData.results || [];
+    const alerts = await computeAlerts(id, medications, patient);
+    const patientsData = await apiCall('/v1/patients');
+    const patients = patientsData.results || [];
+    
+    res.render('index', { 
+      patients, 
+      dashboard: { patient, encounters, medications, alerts } 
+    });
+  } catch (error) {
+    console.error('[ERROR] Failed to load dashboard:', error.message);
+    res.status(500).render('index', { 
+      patients: [], 
+      dashboard: null, 
+      error: 'Failed to load patient dashboard' 
+    });
   }
-
-  // If everything failed:
-  return res.status(500).json({ success: false, error: 'Failed to create patient (AI and standard create failed)' });
-});
-// Dashboard
-app.get('/dashboard/:id', async (req,res)=>{
-  const id = parseInt(req.params.id);
-  const [patient, encountersData, medicationsData] = await Promise.all([
-    apiCall(`/v1/ai/patients/${id}`),
-    apiCall(`/v1/ai/patients/${id}/encounters`),
-    apiCall(`/v1/ai/patients/${id}/medications`)
-  ]);
-  const encounters = encountersData.results || [];
-  const medications = medicationsData.results || [];
-  const alerts = await computeAlerts(id, medications, patient);
-  const patients = (await apiCall('/v1/ai/patients')).results || [];
-  res.render('index', { patients, dashboard:{ patient, encounters, medications, alerts } });
 });
 
-// Create encounter
-app.post('/create-encounter', async (req,res)=>{
-  const patientId = parseInt(req.body.patientId);
-  const prompt = req.body.prompt;
-  await apiCall('/v1/ai/emr','POST',{ patient:patientId, prompt });
-  // Fetch updated data
-  const [patient, encountersData, medicationsData] = await Promise.all([
-    apiCall(`/v1/patients/${patientId}`),
-    apiCall(`/v1/ai/patients/${patientId}/encounters`),
-    apiCall(`/v1/ai/patients/${patientId}/medications`)
-  ]);
-  const encounters = encountersData.results || [];
-  const medications = medicationsData.results || [];
-  const alerts = await computeAlerts(patientId, medications, patient);
-  res.json({ success:true, patient, encounters, medications, alerts });
+// Create encounter with validation and error handling
+app.post('/create-encounter', async (req, res) => {
+  try {
+    // Validate input
+    const patientId = parseInt(req.body.patientId);
+    const prompt = (req.body.prompt || '').toString().trim();
+    
+    if (isNaN(patientId)) {
+      return res.status(400).json({ success: false, error: 'Valid patient ID is required' });
+    }
+    
+    if (!prompt) {
+      return res.status(400).json({ success: false, error: 'Prompt is required' });
+    }
+
+    console.log(`[CREATE ENCOUNTER] Patient ${patientId}, prompt: ${prompt}`);
+    
+    // Create encounter via AI
+    await apiCall('/v1/ai/emr', 'POST', { patient: patientId, prompt });
+    
+    // Fetch updated data
+    const [patient, encountersData, medicationsData] = await Promise.all([
+      apiCall(`/v1/patients/${patientId}`),
+      apiCall(`/v1/patients/${patientId}/encounters`),
+      apiCall(`/v1/patients/${patientId}/medications`)
+    ]);
+    
+    const encounters = encountersData.results || [];
+    const medications = medicationsData.results || [];
+    const alerts = await computeAlerts(patientId, medications, patient);
+    
+    console.log(`[SUCCESS] Encounter created. Alerts: ${alerts.length}`);
+    
+    res.json({ success: true, patient, encounters, medications, alerts });
+  } catch (error) {
+    console.error('[ERROR] Failed to create encounter:', error.message);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Failed to create encounter. Please try again.' 
+    });
+  }
 });
 
-// Webhook
-app.post('/webhook', (req,res)=>{
-  console.log('🔔 PHARMAVIGILANCE WEBHOOK:', req.body);
-  res.json({ received:true });
+// Webhook endpoint with basic validation
+app.post('/webhook', (req, res) => {
+  try {
+    console.log('🔔 [WEBHOOK] PHARMAVIGILANCE ALERT RECEIVED:', JSON.stringify(req.body, null, 2));
+    
+    // Basic validation - in production, verify webhook signature here
+    if (!req.body) {
+      return res.status(400).json({ received: false, error: 'Empty payload' });
+    }
+    
+    res.json({ received: true, timestamp: new Date().toISOString() });
+  } catch (error) {
+    console.error('[ERROR] Webhook processing failed:', error.message);
+    res.status(500).json({ received: false, error: 'Processing failed' });
+  }
 });
 
 // Health check
-app.get('/health', (req,res)=>res.json({ status:'ok', env:MOCK_API ? 'mock':'real' }));
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'ok', 
+    mode: MOCK_API ? 'mock' : 'real',
+    timestamp: new Date().toISOString(),
+    apiConnected: !!API_TOKEN || MOCK_API
+  });
+});
 
 // Start server
-app.listen(PORT, ()=>console.log(`🚀 SafeMed running on port ${PORT}`));
+app.listen(PORT, () => {
+  console.log('='.repeat(60));
+  console.log(`🚀 SafeMed Server Running`);
+  console.log(`📍 Port: ${PORT}`);
+  console.log(`🌐 URL: http://localhost:${PORT}`);
+  console.log(`🔧 Mode: ${MOCK_API ? 'MOCK (Development)' : 'REAL API'}`);
+  console.log(`🔑 API Token: ${API_TOKEN ? 'Configured ✓' : 'Not set (using mock)'}`);
+  console.log(`📡 Base URL: ${BASE_URL}`);
+  console.log('='.repeat(60));
+});
