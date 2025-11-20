@@ -110,7 +110,7 @@ const computeAlerts = async (patientId, meds=[], patient={}) => {
 
 // Home - list patients
 app.get('/', async (req,res)=>{
-  const patients = (await apiCall('/v1/patients')).results || [];
+  const patients = (await apiCall('/v1/ai/patients')).results || [];
   res.render('index', { patients, dashboard: null });
 });
 
@@ -125,14 +125,14 @@ app.post('/create-patient', async (req,res)=>{
 app.get('/dashboard/:id', async (req,res)=>{
   const id = parseInt(req.params.id);
   const [patient, encountersData, medicationsData] = await Promise.all([
-    apiCall(`/v1/patients/${id}`),
-    apiCall(`/v1/patients/${id}/encounters`),
-    apiCall(`/v1/patients/${id}/medications`)
+    apiCall(`/v1/ai/patients/${id}`),
+    apiCall(`/v1/ai/patients/${id}/encounters`),
+    apiCall(`/v1/ai/patients/${id}/medications`)
   ]);
   const encounters = encountersData.results || [];
   const medications = medicationsData.results || [];
   const alerts = await computeAlerts(id, medications, patient);
-  const patients = (await apiCall('/v1/patients')).results || [];
+  const patients = (await apiCall('/v1/ai/patients')).results || [];
   res.render('index', { patients, dashboard:{ patient, encounters, medications, alerts } });
 });
 
@@ -143,9 +143,9 @@ app.post('/create-encounter', async (req,res)=>{
   await apiCall('/v1/ai/emr','POST',{ patient:patientId, prompt });
   // Fetch updated data
   const [patient, encountersData, medicationsData] = await Promise.all([
-    apiCall(`/v1/patients/${patientId}`),
-    apiCall(`/v1/patients/${patientId}/encounters`),
-    apiCall(`/v1/patients/${patientId}/medications`)
+    apiCall(`/v1/ai/patients/${patientId}`),
+    apiCall(`/v1/ai/patients/${patientId}/encounters`),
+    apiCall(`/v1/ai/patients/${patientId}/medications`)
   ]);
   const encounters = encountersData.results || [];
   const medications = medicationsData.results || [];
