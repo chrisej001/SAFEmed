@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <title>Patient Dashboard</title>
+  <style>
+    /* Same as index.ejs */
+    .high { background-color: #ffcccc; color: red; }
+    .medium { background-color: #fff4cc; color: orange; }
+  </style>
+</head>
+<body>
+  <h1>Patient: <%= patient.full_name %> (ID: <%= patient.id %>)</h1>
+  <p>Allergies: <%= patient.allergies ? patient.allergies.join(', ') : 'None' %></p>
+
+  <h2>Safety Alerts (<%= alerts.length %>)</h2>
+  <ul>
+    <% alerts.forEach(a => { %>
+      <li class="<%= a.risk.toLowerCase() %>">⚠️ <%= a.type %>: <%= a.message %> (Risk: <%= a.risk %>)</li>
+    <% }); %>
+    <% if (alerts.length === 0) { %><li>No alerts detected.</li><% } %>
+  </ul>
+
+  <h2>Medications</h2>
+  <table>
+    <tr><th>Name</th><th>Dosage</th><th>Date</th></tr>
+    <% medications.forEach(m => { %>
+      <tr><td><%= m.name || 'N/A' %></td><td><%= m.dose || 'N/A' %></td><td><%= m.created_at || 'N/A' %></td></tr>
+    <% }); %>
+  </table>
+
+  <h2>Encounters</h2>
+  <table>
+    <tr><th>Date</th><th>Summary</th><th>Diagnosis</th></tr>
+    <% encounters.forEach(e => { %>
+      <tr><td><%= e.created_at %></td><td><%= e.summary || 'N/A' %></td><td><%= e.diagnosis || 'N/A' %></td></tr>
+    <% }); %>
+  </table>
+
+  <h3>Add Encounter/Medication (AI Prompt)</h3>
+  <form id="create-encounter-form">
+    <input type="hidden" name="patientId" value="<%= patient.id %>">
+    <input type="text" name="prompt" placeholder="e.g., Patient has fever. Prescribe aspirin and amlodipine. BP: 120/80" required style="width: 400px;">
+    <button type="submit">Add & Check Alerts</button>
+  </form>
+
+  <button id="register-webhook">Register Webhook for Live Updates</button>
+
+  <% if (error) { %><p class="alert">Error: <%= error %></p><% } %>
+
+  <script>
+    // Create Encounter
+    document.getElementById('create-encounter-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const formData = new FormData(e.target);
+      const prompt = formData.get('prompt');
+      const patientId = formData.get('patientId');
+      const res = await fetch('/create-encounter', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt, patientId }) });
+      const data = await res.json();
+      if (data.success) alert('Encounter added! Refreshing...');
+      location.reload();
+    });
+
+    // Register Webhook
+    document.getElementById('register-webhook').addEventListener('click', async () => {
+      const res = await fetch('/register-webhook', { method: 'POST' });
+      const data = await res.json();
+      alert(data.message || data.error);
+    });
+  </script>
+</body>
+</html>
