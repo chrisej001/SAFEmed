@@ -1,6 +1,243 @@
-/* Add if you want polish */
-body { background: #f9f9f9; }
-h1 { color: #007bff; }
-.alert { padding: 10px; border-radius: 5px; }
-.high { border: 1px solid red; }
-.medium { border: 1px solid orange; }
+<div class="navbar">
+  <div class="logo">SafeMed Dashboard</div>
+  <div>
+    <a href="#">Home</a>
+    <a href="#">Patients</a>
+    <a href="#">Alerts</a>
+  </div>
+</div>
+
+/* ===== GLOBAL STYLE ===== */
+body {
+  margin: 0;
+  padding: 0;
+  font-family: 'Inter', 'Segoe UI', Arial, sans-serif;
+  background: linear-gradient(135deg, #f5f7fa, #eef2f7);
+  min-height: 100vh;
+  color: #333;
+}
+
+/* ===== NAVBAR ===== */
+.navbar {
+  width: 100%;
+  padding: 18px 40px;
+  background: #000;
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 600;
+  font-size: 1.1rem;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.15);
+}
+
+.navbar .logo {
+  font-size: 1.4rem;
+  font-weight: 800;
+  letter-spacing: -1px;
+}
+
+.navbar a {
+  color: white;
+  margin-left: 25px;
+  text-decoration: none;
+  font-size: 1rem;
+  opacity: 0.9;
+}
+
+.navbar a:hover {
+  opacity: 1;
+}
+
+/* ===== MAIN CONTENT CONTAINER ===== */
+.container {
+  max-width: 1100px;
+  margin: 40px auto;
+  background: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(12px);
+  padding: 40px;
+  border-radius: 28px;
+  box-shadow: 0 18px 45px rgba(0,0,0,0.12);
+  animation: fadeIn 0.8s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ===== HEADERS ===== */
+h1 {
+  font-size: 2.6rem;
+  font-weight: 800;
+  margin-bottom: 8px;
+}
+
+h2 {
+  font-size: 1.8rem;
+  font-weight: 700;
+  margin-top: 45px;
+  margin-bottom: 15px;
+}
+
+/* ===== TAGS / PILLS ===== */
+.patient-id {
+  font-size: 1.15rem;
+  color: #666;
+  margin-bottom: 15px;
+}
+
+.allergies {
+  display: inline-block;
+  background: #e8f5e9;
+  padding: 10px 18px;
+  font-weight: 600;
+  border-radius: 50px;
+  color: #2e7d32;
+  margin-bottom: 25px;
+}
+
+/* ===== PHARMAVIGILANCE BANNER ===== */
+.alert-banner {
+  text-align: center;
+  padding: 30px;
+  font-size: 2rem;
+  font-weight: 900;
+  border-radius: 25px;
+  color: white;
+  letter-spacing: 1px;
+  margin-bottom: 25px;
+}
+
+.high-risk {
+  background: linear-gradient(135deg, #ff0019, #a80000);
+  box-shadow: 0 12px 30px rgba(255, 0, 0, 0.3);
+  animation: pulse 2s infinite;
+}
+
+.medium-risk {
+  background: linear-gradient(135deg, #ff9800, #ff6f00);
+  box-shadow: 0 12px 30px rgba(255, 153, 0, 0.3);
+}
+
+@keyframes pulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.04); }
+  100% { transform: scale(1); }
+}
+
+/* ===== ALERT LIST ===== */
+.alert-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.alert-item {
+  background: white;
+  border-radius: 18px;
+  padding: 20px;
+  margin-bottom: 20px;
+  font-size: 1.2rem;
+  font-weight: 600;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.08);
+  display: flex;
+  align-items: center;
+}
+
+.alert-item.high {
+  border-left: 8px solid #e53935;
+  background: #ffebee;
+}
+
+.alert-item.medium {
+  border-left: 8px solid #ff9800;
+  background: #fff3e0;
+}
+
+/* ===== TABLE STYLING ===== */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  background: white;
+  border-radius: 20px;
+  overflow: hidden;
+  box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+}
+
+th {
+  background: #000;
+  color: white;
+  padding: 16px;
+  font-size: 1rem;
+  letter-spacing: 0.5px;
+}
+
+td {
+  padding: 14px 18px;
+  font-size: 1rem;
+  border-bottom: 1px solid #eee;
+}
+
+tr:hover {
+  background: #f7f7f7;
+}
+
+/* ===== FORMS ===== */
+.form-section {
+  margin-top: 45px;
+  background: #f0fff4;
+  padding: 25px;
+  border-radius: 22px;
+  box-shadow: 0 6px 22px rgba(0,0,0,0.06);
+}
+
+input[type="text"] {
+  width: 70%;
+  padding: 16px;
+  font-size: 1.1rem;
+  border-radius: 14px;
+  border: 1px solid #ccc;
+  outline: none;
+  transition: all 0.2s ease;
+}
+
+input[type="text"]:focus {
+  border-color: #2e7d32;
+  box-shadow: 0 0 0 5px rgba(46,125,50,0.2);
+}
+
+/* ===== BUTTONS ===== */
+button {
+  padding: 15px 32px;
+  border: none;
+  border-radius: 14px;
+  font-size: 1.1rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: 0.2s;
+}
+
+button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 22px rgba(0,0,0,0.15);
+}
+
+button[type="submit"] {
+  background: #000;
+  color: white;
+}
+
+.webhook-btn {
+  background: #2e7d32;
+  color: white;
+  margin-top: 15px;
+}
+
+/* ===== FOOTER ===== */
+.ahead-footer {
+  text-align: center;
+  margin-top: 60px;
+  color: #666;
+  font-size: 0.95rem;
+}

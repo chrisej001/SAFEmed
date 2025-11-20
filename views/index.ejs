@@ -4,9 +4,10 @@
   <title>SafeMed Dashboard</title>
   <style>
     body { font-family: Arial, sans-serif; margin: 20px; }
-    table { border-collapse: collapse; width: 100%; }
+    table { border-collapse: collapse; width: 100%; margin-bottom: 20px; }
     th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-    .alert { color: red; font-weight: bold; }
+    .alert-box { padding: 10px; background: #ffefef; border-left: 4px solid red; margin-bottom: 10px; }
+    .section-title { margin-top: 30px; }
     form { margin-bottom: 20px; }
   </style>
 </head>
@@ -23,7 +24,7 @@
   <h3>Patient List</h3>
   <table>
     <tr><th>ID</th><th>Name</th><th>Actions</th></tr>
-    <% patients.forEach(p => { %>
+    <% (patients || []).forEach(p => { %>
       <tr>
         <td><%= p.id %></td>
         <td><%= p.full_name %></td>
@@ -32,20 +33,64 @@
     <% }); %>
   </table>
 
-    <% if (typeof error !== 'undefined' && error) { %>
-    <p class="alert">Error: <%= typeof error === 'object' ? error.message : error %></p>
+  <% if (typeof error !== 'undefined' && error) { %>
+    <p class="alert-box">Error: <%= error %></p>
+  <% } %>
+
+
+  <% if (dashboard) { %>
+
+    <h2 class="section-title">Patient Dashboard: <%= dashboard.patient.full_name %></h2>
+
+    <h3>Alerts</h3>
+    <% if (dashboard.alerts.length === 0) { %>
+      <p>No alerts 🎉</p>
+    <% } %>
+    <% dashboard.alerts.forEach(a => { %>
+      <div class="alert-box">
+        <strong><%= a.type %></strong><br>
+        <%= a.message %>  
+      </div>
+    <% }) %>
+
+    <h3 class="section-title">Medications</h3>
+    <table>
+      <tr><th>Name</th><th>Patient</th></tr>
+      <% dashboard.medications.forEach(m => { %>
+        <tr>
+          <td><%= m.name %></td>
+          <td><%= m.patient_id %></td>
+        </tr>
+      <% }) %>
+    </table>
+
+    <h3 class="section-title">Encounters</h3>
+    <table>
+      <tr><th>Date</th><th>Summary</th></tr>
+      <% dashboard.encounters.forEach(e => { %>
+        <tr>
+          <td><%= e.created_at %></td>
+          <td><%= e.summary %></td>
+        </tr>
+      <% }) %>
+    </table>
+
   <% } %>
 
   <script>
     document.getElementById('create-patient-form').addEventListener('submit', async (e) => {
       e.preventDefault();
-      const formData = new FormData(e.target);
-      const prompt = formData.get('prompt');
-      const res = await fetch('/create-patient', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt }) });
+      const prompt = new FormData(e.target).get('prompt');
+      const res = await fetch('/create-patient', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt })
+      });
       const data = await res.json();
       if (data.success) alert(`Patient created! ID: ${data.patientId}`);
       location.reload();
     });
   </script>
+
 </body>
 </html>
