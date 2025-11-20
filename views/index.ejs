@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <title>SafeMed Dashboard</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+    .alert { color: red; font-weight: bold; }
+    form { margin-bottom: 20px; }
+  </style>
+</head>
+<body>
+  <h1>🛡️ SafeMed: Real-Time Patient Safety Alert Dashboard</h1>
+  <p>Powered by Dorra EMR API - Automates notes, detects risks, reduces burnout!</p>
+
+  <h3>Create New Patient (AI Prompt)</h3>
+  <form id="create-patient-form">
+    <input type="text" name="prompt" placeholder="e.g., New patient Jane Doe, female, 45, allergic to penicillin, Lagos" required style="width: 400px;">
+    <button type="submit">Create Patient</button>
+  </form>
+
+  <h3>Patient List</h3>
+  <table>
+    <tr><th>ID</th><th>Name</th><th>Actions</th></tr>
+    <% patients.forEach(p => { %>
+      <tr>
+        <td><%= p.id %></td>
+        <td><%= p.full_name %></td>
+        <td><a href="/dashboard/<%= p.id %>">View Dashboard & Alerts</a></td>
+      </tr>
+    <% }); %>
+  </table>
+
+  <% if (error) { %><p class="alert">Error: <%= error %></p><% } %>
+
+  <script>
+    document.getElementById('create-patient-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const formData = new FormData(e.target);
+      const prompt = formData.get('prompt');
+      const res = await fetch('/create-patient', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt }) });
+      const data = await res.json();
+      if (data.success) alert(`Patient created! ID: ${data.patientId}`);
+      location.reload();
+    });
+  </script>
+</body>
+</html>
