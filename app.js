@@ -114,13 +114,84 @@ app.get('/', async (req,res)=>{
   res.render('index', { patients, dashboard: null });
 });
 
-// Create patient
-app.post('/create-patient', async (req,res)=>{
-  const prompt = req.body.prompt;
-  const r = await apiCall('/v1/ai/patient','POST',{ prompt });
-  res.json({ success:true, patientId:r.id });
-});
+// // Create patient
+// app.post('/create-patient', async (req,res)=>{
+//   const prompt = req.body.prompt;
+//   const r = await apiCall('/v1/ai/patient','POST',{ prompt });
+//   res.json({ success:true, patientId:r.id });
+// });
 
+app.post('/create-patient', async (req, res) => {
+  const prompt = (req.body.prompt || '').toString();
+  global.lastPrompt = prompt;
+
+  // Helper to call standard create (non-AI)
+  const standardCreate = async (derived) => {
+    // derived should be an object matching minimal required fields.
+    // docs require first_name; include full_name if available
+    try {
+      const r = await apiCall('/v1/patients/create', 'POST', derived);
+      // docs return { status: true, status_code: 201, id: 67 } — adapt if API responds differently
+      return r?.id || (r?.status === true && r?.id) || null;
+    } catch (e) {
+      console.error('Standard create failed:', e?.message || e);
+      return null;
+    }
+  };
+
+  try {
+    // 1) Try AI endpoint first (preferred)
+    console.log('Attempting AI patient create with prompt:', prompt);
+    const aiResp = await apiCall('/v1/ai/patient', 'POST', { prompt });
+
+    // AI may return { status:true, id: 67 } or similar
+    const aiId = aiResp?.id || (aiResp?.status === true && aiResp?.id) || null;
+    if (aiId) {
+      return res.json({ success: true, patientId: aiId });
+    }
+
+    // If AI returned but no id, fall through to standard create
+    console.warn('AI create returned but no id, falling back to standard create', aiResp);
+  } catch (err) {
+    console.warn('AI create failed (will attempt standard create). Error:', err.message || err);
+  }
+
+  // 2) Attempt regular create endpoint as fallback
+  // Build a minimal body from prompt. This is heuristic: you can improve parsing if you want
+  const derived = {
+    first_name: 'New',                // required by docs — change parsing to extract real name if possible
+    full_name: prompt.substring(0, 200),
+    allergies: []
+  };
+
+  // quick parse: look for "allergic to X" in the prompt (basic heuristic)
+  const m = prompt.toLowerCase().match(/allergic to ([a-zA-Z, ]+)/);
+  if (m) {
+    const list = m[1].split(',').map(s => s.trim()).filter(Boolean);
+    if (list.length) derived.allergies = list;
+    if (list.length && derived.full_name === prompt.substring(0,200)) {
+      // try to set a better full_name (optional)
+      // if prompt includes "New patient John Doe", extract after "New patient"
+      const nameMatch = prompt.match(/new patient\s+([A-Za-z\s]+)/i);
+      if (nameMatch) derived.first_name = nameMatch[1].split(' ')[0] || 'New';
+      derived.full_name = (nameMatch ? nameMatch[1].trim() : derived.full_name).substring(0,200);
+    }
+  }
+
+  const stdId = await standardCreate(derived);
+  if (stdId) return res.json({ success: true, patientId: stdId });
+
+  // 3) Last resort: mock fallback (so UI remains functional)
+  if (MOCK_API) {
+    // mockResponseFor handles adding patient to in-memory store
+    const mResp = mockResponseFor('/v1/ai/patient', 'POST', { prompt });
+    const id = mResp?.id || null;
+    if (id) return res.json({ success: true, patientId: id });
+  }
+
+  // If everything failed:
+  return res.status(500).json({ success: false, error: 'Failed to create patient (AI and standard create failed)' });
+});
 // Dashboard
 app.get('/dashboard/:id', async (req,res)=>{
   const id = parseInt(req.params.id);
@@ -143,7 +214,7 @@ app.post('/create-encounter', async (req,res)=>{
   await apiCall('/v1/ai/emr','POST',{ patient:patientId, prompt });
   // Fetch updated data
   const [patient, encountersData, medicationsData] = await Promise.all([
-    apiCall(`/v1/ai/patients/${patientId}`),
+    apiCall(`/v1/patients/${patientId}`),
     apiCall(`/v1/ai/patients/${patientId}/encounters`),
     apiCall(`/v1/ai/patients/${patientId}/medications`)
   ]);
