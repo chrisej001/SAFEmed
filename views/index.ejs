@@ -1,96 +1,151 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SafeMed Dashboard</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
   <style>
-    body { font-family: Arial, sans-serif; margin: 20px; }
-    table { border-collapse: collapse; width: 100%; margin-bottom: 20px; }
-    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-    .alert-box { padding: 10px; background: #ffefef; border-left: 4px solid red; margin-bottom: 10px; }
-    .section-title { margin-top: 30px; }
-    form { margin-bottom: 20px; }
+    body { font-family: 'Inter', sans-serif; margin:0; padding:0; background:#f5f7fa; color:#333; }
+    .container { max-width: 1100px; margin: 40px auto; background:white; border-radius:16px; padding:30px; box-shadow:0 10px 30px rgba(0,0,0,0.1); }
+    h1 { font-size:2.5rem; color:#1f2937; margin-bottom:10px; }
+    h2 { font-size:1.8rem; color:#1f2937; margin-top:40px; margin-bottom:20px; }
+    .section-title { font-size:1.5rem; margin-bottom:20px; }
+    table { width:100%; border-collapse:collapse; margin-bottom:20px; }
+    th, td { padding:12px 15px; text-align:left; border-bottom:1px solid #e5e7eb; }
+    th { background:#111827; color:white; }
+    tr:hover { background:#f3f4f6; }
+    .patient-id { color:#6b7280; margin-bottom:10px; }
+    .allergies { background:#d1fae5; padding:10px 15px; border-radius:12px; font-weight:600; display:inline-block; margin-bottom:20px; }
+    .alert-banner { padding:25px; border-radius:16px; text-align:center; font-weight:700; font-size:1.8rem; color:white; margin-bottom:20px; }
+    .high-risk { background:linear-gradient(135deg,#ef4444,#b91c1c); animation:pulse 2s infinite; }
+    .medium-risk { background:linear-gradient(135deg,#f97316,#b45309); }
+    @keyframes pulse { 0%{opacity:1;}50%{opacity:0.85;}100%{opacity:1;} }
+    .alert-list { list-style:none; padding:0; }
+    .alert-item { padding:20px; margin-bottom:15px; border-radius:12px; box-shadow:0 4px 15px rgba(0,0,0,0.08); font-weight:600; }
+    .high { border-left:8px solid #ef4444; background:#fee2e2; }
+    .medium { border-left:8px solid #f97316; background:#fff7ed; }
+    .form-section { background:#d1fae5; padding:20px; border-radius:16px; margin-top:30px; }
+    input[type=text] { width:70%; padding:12px 15px; font-size:1rem; border-radius:8px; border:1px solid #ccc; }
+    button { padding:12px 25px; font-size:1rem; border-radius:8px; border:none; cursor:pointer; font-weight:600; }
+    button:hover { opacity:0.9; }
+    .primary-btn { background:#111827; color:white; margin-left:10px; }
+    .webhook-btn { background:#10b981; color:white; margin-top:10px; }
+    .no-alerts { text-align:center; font-size:1.3rem; color:#10b981; padding:40px 0; }
+    .footer { text-align:center; margin-top:50px; color:#6b7280; font-size:0.9rem; }
   </style>
 </head>
 <body>
-  <h1>🛡️ SafeMed: Real-Time Patient Safety Alert Dashboard</h1>
-  <p>Powered by Dorra EMR API - Automates notes, detects risks, reduces burnout!</p>
+  <div class="container">
+    <h1>🛡️ SafeMed Dashboard</h1>
 
-  <h3>Create New Patient (AI Prompt)</h3>
-  <form id="create-patient-form">
-    <input type="text" name="prompt" placeholder="e.g., New patient Jane Doe, female, 45, allergic to penicillin, Lagos" required style="width: 400px;">
-    <button type="submit">Create Patient</button>
-  </form>
+    <!-- Patient List -->
+    <h2>Patients</h2>
+    <table>
+      <tr><th>ID</th><th>Name</th><th>Actions</th></tr>
+      <% patients.forEach(p => { %>
+        <tr>
+          <td><%= p.id %></td>
+          <td><%= p.full_name %></td>
+          <td><a href="/dashboard/<%= p.id %>">View Dashboard & Alerts</a></td>
+        </tr>
+      <% }); %>
+    </table>
 
-  <h3>Patient List</h3>
-  <table>
-    <tr><th>ID</th><th>Name</th><th>Actions</th></tr>
-    <% (patients || []).forEach(p => { %>
-      <tr>
-        <td><%= p.id %></td>
-        <td><%= p.full_name %></td>
-        <td><a href="/dashboard/<%= p.id %>">View Dashboard & Alerts</a></td>
-      </tr>
-    <% }); %>
-  </table>
+    <!-- Dashboard Section (only show if dashboard exists) -->
+    <% if (typeof dashboard !== 'undefined' && dashboard) { %>
+      <h2 class="section-title">Patient Dashboard: <%= dashboard.patient.full_name %></h2>
+      <p class="patient-id">Patient ID: <%= dashboard.patient.id %></p>
+      <div class="allergies">Allergies: <%= dashboard.patient.allergies.length ? dashboard.patient.allergies.join(', ') : 'None recorded' %></div>
 
-  <% if (typeof error !== 'undefined' && error) { %>
-    <p class="alert-box">Error: <%= error %></p>
-  <% } %>
+      <% if (dashboard.alerts.length > 0) { %>
+        <div class="alert-banner <%= dashboard.alerts.some(a=>a.risk==='High') ? 'high-risk':'medium-risk' %>">
+          PHARMAVIGILANCE ALERT
+        </div>
+      <% } %>
 
+      <h3>Safety Alerts (<%= dashboard.alerts.length %>)</h3>
+      <% if (dashboard.alerts.length === 0) { %>
+        <div class="no-alerts">✅ No safety concerns detected. Patient is clear!</div>
+      <% } else { %>
+        <ul class="alert-list">
+          <% dashboard.alerts.forEach(a => { %>
+            <li class="alert-item <%= a.risk.toLowerCase() %>">
+              ⚠️ <%= a.type %>: <%= a.message %> (<strong>Risk: <%= a.risk %></strong>)
+            </li>
+          <% }); %>
+        </ul>
+      <% } %>
 
-  <% if (dashboard) { %>
+      <h3>Current Medications</h3>
+      <table>
+        <tr><th>Medication</th><th>Dosage</th><th>Prescribed Date</th></tr>
+        <% if (dashboard.medications.length > 0) { %>
+          <% dashboard.medications.forEach(m => { %>
+            <tr>
+              <td><%= m.name %></td>
+              <td><%= m.dose || m.dosage || 'Standard' %></td>
+              <td><%= m.created_at ? new Date(m.created_at).toLocaleDateString() : 'Today' %></td>
+            </tr>
+          <% }); %>
+        <% } else { %>
+          <tr><td colspan="3" style="text-align:center; color:#6b7280;">No medications recorded yet</td></tr>
+        <% } %>
+      </table>
 
-    <h2 class="section-title">Patient Dashboard: <%= dashboard.patient.full_name %></h2>
+      <h3>Recent Encounters</h3>
+      <table>
+        <tr><th>Date</th><th>Summary</th><th>Diagnosis</th></tr>
+        <% if (dashboard.encounters.length > 0) { %>
+          <% dashboard.encounters.forEach(e => { %>
+            <tr>
+              <td><%= new Date(e.created_at).toLocaleDateString() %></td>
+              <td><%= e.summary || 'Clinical consultation' %></td>
+              <td><%= e.diagnosis || 'N/A' %></td>
+            </tr>
+          <% }); %>
+        <% } else { %>
+          <tr><td colspan="3" style="text-align:center; color:#6b7280;">No encounters recorded yet</td></tr>
+        <% } %>
+      </table>
 
-    <h3>Alerts</h3>
-    <% if (dashboard.alerts.length === 0) { %>
-      <p>No alerts 🎉</p>
-    <% } %>
-    <% dashboard.alerts.forEach(a => { %>
-      <div class="alert-box">
-        <strong><%= a.type %></strong><br>
-        <%= a.message %>  
+      <!-- Add Encounter Form -->
+      <div class="form-section">
+        <h3>Add Encounter / Prescription (AI Prompt)</h3>
+        <form id="create-encounter-form">
+          <input type="hidden" name="patientId" value="<%= dashboard.patient.id %>">
+          <input type="text" name="prompt" placeholder="e.g., Patient has fever. Prescribe aspirin and amlodipine." required>
+          <button type="submit" class="primary-btn">🚀 Add & Check Safety</button>
+        </form>
+        <button id="register-webhook" class="webhook-btn">Register Webhook for Live Alerts</button>
       </div>
-    <% }) %>
+    <% } %>
 
-    <h3 class="section-title">Medications</h3>
-    <table>
-      <tr><th>Name</th><th>Patient</th></tr>
-      <% dashboard.medications.forEach(m => { %>
-        <tr>
-          <td><%= m.name %></td>
-          <td><%= m.patient_id %></td>
-        </tr>
-      <% }) %>
-    </table>
-
-    <h3 class="section-title">Encounters</h3>
-    <table>
-      <tr><th>Date</th><th>Summary</th></tr>
-      <% dashboard.encounters.forEach(e => { %>
-        <tr>
-          <td><%= e.created_at %></td>
-          <td><%= e.summary %></td>
-        </tr>
-      <% }) %>
-    </table>
-
-  <% } %>
+    <div class="footer">
+      Built for AHEAD 2025 • Dorra EMR + PharmaVigilance API • Reducing burnout, saving lives
+    </div>
+  </div>
 
   <script>
-    document.getElementById('create-patient-form').addEventListener('submit', async (e) => {
+    document.getElementById('create-encounter-form')?.addEventListener('submit', async (e) => {
       e.preventDefault();
-      const prompt = new FormData(e.target).get('prompt');
-      const res = await fetch('/create-patient', {
+      const formData = new FormData(e.target);
+      const prompt = formData.get('prompt');
+      const patientId = formData.get('patientId');
+      const res = await fetch('/create-encounter', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt })
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ prompt, patientId })
       });
       const data = await res.json();
-      if (data.success) alert(`Patient created! ID: ${data.patientId}`);
-      location.reload();
+      if(data.success){ alert('✅ Encounter added! Checking safety...'); setTimeout(()=>location.reload(),800);}
+    });
+
+    document.getElementById('register-webhook')?.addEventListener('click', async ()=>{
+      const res = await fetch('/register-webhook',{method:'POST'});
+      const data = await res.json();
+      alert(data.message || data.error || 'Webhook active!');
     });
   </script>
-
 </body>
 </html>

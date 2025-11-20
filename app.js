@@ -48,15 +48,10 @@ function authHeaders() {
 
 // Helper: safe axios wrapper with fallback to mock
 async function apiCall(endpoint, method = 'GET', data = null) {
-  // Normalize endpoint prefix
   if (!endpoint.startsWith('/')) endpoint = '/' + endpoint;
 
-  // If mock mode explicitly enabled, return mock
-  if (MOCK_API) {
-    return mockResponseFor(endpoint, method, data);
-  }
+  if (MOCK_API) return mockResponseFor(endpoint, method, data);
 
-  // Attempt real request
   try {
     const url = `${BASE_URL}${endpoint}`;
     const resp = await axios({
@@ -68,53 +63,36 @@ async function apiCall(endpoint, method = 'GET', data = null) {
     });
     return resp.data;
   } catch (err) {
-    // Log full error for debugging
     console.error('API Error:', err.response?.status, err.response?.data || err.message);
 
-    // Automatic graceful fallback: if network/DNS error or 5xx, switch to mock mode temporarily
     const message = err.message || '';
     if (message.includes('ENOTFOUND') || message.includes('ECONNREFUSED') || (err.response && err.response.status >= 500)) {
-      console.warn('Remote API unreachable — switching to mock mode fallback for this request.');
-      // Do not mutate global MOCK_API here permanently; just return mock for this call
+      console.warn('Remote API unreachable — using mock fallback.');
       return mockResponseFor(endpoint, method, data);
     }
 
-    // For 4xx errors (client errors), rethrow to let route handle appropriately
     const thrown = new Error(err.response?.data?.message || err.message || 'API request failed');
     thrown.status = err.response?.status;
     throw thrown;
   }
 }
 
-// Produce simple mock responses matching expected shapes
+// Mock responses
 function mockResponseFor(endpoint, method, data) {
-  // Patients list
-  if (endpoint === '/v1/patients' && method === 'GET') {
-    return { count: mockData.patients.length, results: mockData.patients };
-  }
-
-  // Get patient by id
+  if (endpoint === '/v1/patients' && method === 'GET') return { count: mockData.patients.length, results: mockData.patients };
   if (endpoint.match(/^\/v1\/patients\/\d+$/) && method === 'GET') {
     const id = parseInt(endpoint.split('/').pop());
     const p = mockData.patients.find(x => x.id === id);
     return p || {};
   }
-
-  // Patient encounters
   if (endpoint.match(/^\/v1\/patients\/\d+\/encounters/) && method === 'GET') {
     const id = parseInt(endpoint.split('/')[3]);
-    return { count: mockData.encounters.filter(e => e.patient === id).length,
-             results: mockData.encounters.filter(e => e.patient === id) };
+    return { count: mockData.encounters.filter(e => e.patient === id).length, results: mockData.encounters.filter(e => e.patient === id) };
   }
-
-  // Patient medications
   if (endpoint.match(/^\/v1\/patients\/\d+\/medications/) && method === 'GET') {
     const id = parseInt(endpoint.split('/')[3]);
-    return { count: mockData.medications.filter(m => m.patient_id === id).length,
-             results: mockData.medications.filter(m => m.patient_id === id) };
+    return { count: mockData.medications.filter(m => m.patient_id === id).length, results: mockData.medications.filter(m => m.patient_id === id) };
   }
-
-  // AI create patient
   if (endpoint === '/v1/ai/patient' && method === 'POST') {
     const newId = mockData.patients.length + 1;
     const prompt = (data?.prompt || '').toString();
@@ -123,63 +101,43 @@ function mockResponseFor(endpoint, method, data) {
     mockData.patients.push(created);
     return { status: true, status_code: 201, message: 'success', id: newId };
   }
-
-  // AI emr (create encounter/appointment)
   if (endpoint === '/v1/ai/emr' && method === 'POST') {
     const patientId = parseInt(data?.patient) || null;
     const summary = (data?.prompt || '').toString().substring(0, 140);
-    const created = {
-      id: mockData.encounters.length + 1,
-      created_at: new Date().toISOString(),
-      summary,
-      patient: patientId,
-      encounter_medications: []
-    };
-    // extract simple med names from prompt
+    const created = { id: mockData.encounters.length + 1, created_at: new Date().toISOString(), summary, patient: patientId, encounter_medications: [] };
     const lower = (data?.prompt || '').toLowerCase();
     if (lower.includes('aspirin')) mockData.medications.push({ name: 'Aspirin', patient_id: patientId });
     if (lower.includes('amlodipine')) mockData.medications.push({ name: 'Amlodipine', patient_id: patientId });
     if (lower.includes('amoxicillin')) mockData.medications.push({ name: 'Amoxicillin', patient_id: patientId });
-
     mockData.encounters.push(created);
     return { status: true, status_code: 201, message: 'created', resource: 'Encounter', id: created.id };
   }
-
-  // Default fallback
   return {};
 }
 
-// Compute alerts using either mock store or real fetched meds/patient
+// Compute alerts
 async function computeAlerts(patientId, medsFromApi = null, patientFromApi = null) {
   const meds = medsFromApi || (mockData.medications || []);
   const patient = patientFromApi || mockData.patients.find(p => p.id === patientId) || { allergies: [] };
   let alerts = [];
 
-  // Allergy checks - patient.allergies is expected to be array or string
   const allergies = Array.isArray(patient.allergies) ? patient.allergies : (patient.allergies ? [patient.allergies] : []);
-
   allergies.forEach(allergy => {
     meds.forEach(med => {
-      const medName = (med.name || med.medication_name || '').toString().toLowerCase();
-      if (allergy && medName.includes(allergy.toLowerCase())) {
-        alerts.push({ type: 'ALLERGY RISK', message: `Patient is allergic to ${allergy}!`, risk: 'High' });
-      }
+      const medName = (med.name || med.medication_name || '').toLowerCase();
+      if (allergy && medName.includes(allergy.toLowerCase())) alerts.push({ type: 'ALLERGY RISK', message: `Patient is allergic to ${allergy}!`, risk: 'High' });
     });
   });
 
-  // Drug interaction alerts
   for (let combo of RISKY_COMBINATIONS) {
     const [a, b] = combo;
-    const hasA = meds.some(m => (m.name || '').toString().toLowerCase().includes(a));
-    const hasB = meds.some(m => (m.name || '').toString().toLowerCase().includes(b));
-    if (hasA && hasB) {
-      alerts.push({ type: 'DRUG INTERACTION', message: `${a} + ${b} = Serious risk (e.g., bleeding, BP spike)`, risk: 'High' });
-    }
+    const hasA = meds.some(m => (m.name || '').toLowerCase().includes(a));
+    const hasB = meds.some(m => (m.name || '').toLowerCase().includes(b));
+    if (hasA && hasB) alerts.push({ type: 'DRUG INTERACTION', message: `${a} + ${b} = Serious risk`, risk: 'High' });
   }
 
-  // Extra: if lastPrompt contains dangerous combo
   if (global.lastPrompt && global.lastPrompt.toLowerCase().includes('aspirin') && global.lastPrompt.toLowerCase().includes('amlodipine')) {
-    alerts.push({ type: 'PHARMAVIGILANCE ALERT', message: 'Major drug interaction detected: Blood pressure risk!', risk: 'High' });
+    alerts.push({ type: 'PHARMAVIGILANCE ALERT', message: 'Major drug interaction detected', risk: 'High' });
   }
 
   return alerts;
@@ -190,15 +148,10 @@ async function computeAlerts(patientId, medsFromApi = null, patientFromApi = nul
 // Home - list patients
 app.get('/', async (req, res) => {
   try {
-    const raw = MOCK_API ? await apiCall('/v1/patients') : await apiCall('/v1/patients');
-    // raw may be { count, results } or array
-    const patients = Array.isArray(raw) ? raw : (raw.results || []);
-    res.render('index', { patients, alerts: [], error: null, mock: MOCK_API });
+    const patients = MOCK_API ? { results: mockData.patients } : await apiCall('/v1/patients');
+    res.render('index', { patients: patients.results || [], mock: MOCK_API, dashboard: null, error: null });
   } catch (err) {
-    console.error('Error loading patients:', err.message || err);
-    // fallback to mock store if available
-    const patients = mockData.patients || [];
-    res.render('index', { patients, alerts: [], error: err.message || 'Could not fetch patients', mock: MOCK_API });
+    res.render('index', { patients: [], error: MOCK_API ? null : err.message, mock: MOCK_API, dashboard: null });
   }
 });
 
@@ -206,13 +159,8 @@ app.get('/', async (req, res) => {
 app.post('/create-patient', async (req, res) => {
   global.lastPrompt = req.body.prompt || '';
   try {
-    if (MOCK_API) {
-      const r = await apiCall('/v1/ai/patient', 'POST', { prompt: req.body.prompt });
-      return res.json({ success: true, patientId: r.id });
-    }
-    const result = await apiCall('/v1/ai/patient', 'POST', { prompt: req.body.prompt });
-    // result shape per docs: { status: true, status_code: 201, message: 'success', id: 67 }
-    return res.json({ success: true, patientId: result.id || result });
+    const r = await apiCall('/v1/ai/patient', 'POST', { prompt: req.body.prompt });
+    return res.json({ success: true, patientId: r.id || r });
   } catch (err) {
     console.error('Create patient error:', err.message || err);
     return res.json({ success: false, error: err.message || 'Failed to create patient' });
@@ -223,28 +171,20 @@ app.post('/create-patient', async (req, res) => {
 app.post('/create-encounter', async (req, res) => {
   global.lastPrompt = req.body.prompt || '';
   const patientId = parseInt(req.body.patientId) || null;
-  if (!patientId) {
-    return res.status(400).json({ success: false, error: 'patientId required' });
-  }
+  if (!patientId) return res.status(400).json({ success: false, error: 'patientId required' });
 
   try {
-    if (MOCK_API) {
-      await apiCall('/v1/ai/emr', 'POST', { prompt: req.body.prompt, patient: patientId });
-    } else {
-      await apiCall('/v1/ai/emr', 'POST', { prompt: req.body.prompt, patient: patientId });
-    }
+    await apiCall('/v1/ai/emr', 'POST', { prompt: req.body.prompt, patient: patientId });
 
-    // After creating encounter, fetch freshest data to build dashboard
     const [patientRaw, encountersRaw, medsRaw] = await Promise.all([
       apiCall(`/v1/patients/${patientId}`),
       apiCall(`/v1/patients/${patientId}/encounters`),
       apiCall(`/v1/patients/${patientId}/medications`)
     ]);
 
-    const patient = (patientRaw && patientRaw.id) ? patientRaw : (patientRaw || {});
+    const patient = patientRaw || {};
     const encounters = Array.isArray(encountersRaw) ? encountersRaw : (encountersRaw.results || []);
     const medications = Array.isArray(medsRaw) ? medsRaw : (medsRaw.results || []);
-
     const alerts = await computeAlerts(patientId, medications, patient);
 
     return res.json({ success: true, patient, encounters, medications, alerts });
@@ -257,19 +197,18 @@ app.post('/create-encounter', async (req, res) => {
 // Dashboard for a patient
 app.get('/dashboard/:id', async (req, res) => {
   const id = parseInt(req.params.id);
-  if (!id) {
-    return res.status(400).send('Invalid patient id');
-  }
+  if (!id) return res.status(400).send('Invalid patient id');
 
   try {
-    const patientRaw = await apiCall(`/v1/patients/${id}`);
-    const encountersRaw = await apiCall(`/v1/patients/${id}/encounters`);
-    const medsRaw = await apiCall(`/v1/patients/${id}/medications`);
+    const [patientRaw, encountersRaw, medsRaw] = await Promise.all([
+      apiCall(`/v1/patients/${id}`),
+      apiCall(`/v1/patients/${id}/encounters`),
+      apiCall(`/v1/patients/${id}/medications`)
+    ]);
 
     const patient = patientRaw || {};
     const encounters = Array.isArray(encountersRaw) ? encountersRaw : (encountersRaw.results || []);
     const medications = Array.isArray(medsRaw) ? medsRaw : (medsRaw.results || []);
-
     const alerts = await computeAlerts(id, medications, patient);
 
     res.render('index', {
@@ -279,27 +218,26 @@ app.get('/dashboard/:id', async (req, res) => {
       medications,
       alerts,
       error: null,
-      mock: MOCK_API
+      mock: MOCK_API,
+      dashboard: true // <<< fixed: define dashboard so EJS doesn't throw
     });
   } catch (err) {
     console.error('Dashboard error:', err.message || err);
-    // fallback to mock view
     const patient = mockData.patients.find(p => p.id === id) || {};
     const encounters = mockData.encounters.filter(e => e.patient === id);
     const medications = mockData.medications.filter(m => m.patient_id === id);
     const alerts = await computeAlerts(id, medications, patient);
-    return res.render('index', { patients: [patient], patient, encounters, medications, alerts, error: err.message || 'Using mock data', mock: MOCK_API });
+    return res.render('index', { patients: [patient], patient, encounters, medications, alerts, error: err.message || 'Using mock data', mock: MOCK_API, dashboard: true });
   }
 });
 
-// Webhook receiver (pharmavigilance events)
+// Webhook receiver
 app.post('/webhook', (req, res) => {
   console.log('🔔 PHARMAVIGILANCE WEBHOOK:', JSON.stringify(req.body, null, 2));
-  // TODO: verify signature if provided by API; persist event if needed
   res.json({ received: true });
 });
 
-// Health route
+// Health
 app.get('/health', (req, res) => res.json({ status: 'ok', env: MOCK_API ? 'mock' : 'real' }));
 
 // Start server
