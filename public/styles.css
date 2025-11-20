@@ -1,0 +1,6 @@
+/* Add if you want polish */
+body { background: #f9f9f9; }
+h1 { color: #007bff; }
+.alert { padding: 10px; border-radius: 5px; }
+.high { border: 1px solid red; }
+.medium { border: 1px solid orange; }
