@@ -45,7 +45,9 @@
 
   <button id="register-webhook">Register Webhook for Live Updates</button>
 
-  <% if (error) { %><p class="alert">Error: <%= error %></p><% } %>
+    <% if (typeof error !== 'undefined' && error) { %>
+    <p class="alert">Error: <%= typeof error === 'object' ? error.message : error %></p>
+  <% } %>
 
   <script>
     // Create Encounter

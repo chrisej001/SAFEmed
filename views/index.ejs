@@ -32,7 +32,9 @@
     <% }); %>
   </table>
 
-  <% if (error) { %><p class="alert">Error: <%= error %></p><% } %>
+    <% if (typeof error !== 'undefined' && error) { %>
+    <p class="alert">Error: <%= typeof error === 'object' ? error.message : error %></p>
+  <% } %>
 
   <script>
     document.getElementById('create-patient-form').addEventListener('submit', async (e) => {
