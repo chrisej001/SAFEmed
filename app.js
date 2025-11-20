@@ -156,14 +156,24 @@ app.post('/create-encounter', async (req, res) => {
 });
 
 app.get('/dashboard/:id', async (req, res) => {
-  const id = parseInt(req.params.id);
-  const patient = mockData.patients.find(p => p.id === id) || { full_name: "Patient", allergies: [] };
-  const alerts = await computeAlerts(id);
-  res.render('index', { 
-  patients: [], 
-  error: err.message || 'Unknown error', 
-  mock: MOCK_API 
+  try {
+    const id = parseInt(req.params.id);
+    const patient = mockData.patients.find(p => p.id === id) || { full_name: "Patient", allergies: [] };
+    const alerts = await computeAlerts(id);
+    res.render('index', { 
+      patients: [], 
+      error: null, 
+      mock: MOCK_API 
+    });
+  } catch (err) {
+    res.render('index', { 
+      patients: [], 
+      error: err.message || 'Unknown error', 
+      mock: MOCK_API 
+    });
+  }
 });
+
 
 // Webhook receiver
 app.post('/webhook', (req, res) => {
