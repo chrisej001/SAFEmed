@@ -165,7 +165,7 @@ app.get('/dashboard/:id', async (req, res) => {
   mock: MOCK_API 
 });
 
-// Webhook receiver - shows live alert in console + can add socket later
+// Webhook receiver
 app.post('/webhook', (req, res) => {
   console.log('🔔🔔 PHARMAVIGILANCE WEBHOOK RECEIVED! 🔔🔔', req.body);
   res.json({ received: true });
