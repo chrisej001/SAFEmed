@@ -39,37 +39,50 @@
   <div class="container">
     <h1>🛡️ SafeMed Dashboard</h1>
 
+    <!-- Create Patient Form -->
+    <div class="form-section">
+      <h3>Create New Patient (AI Prompt)</h3>
+      <form id="create-patient-form">
+        <input type="text" name="prompt" placeholder="e.g., New patient Jane Doe, allergic to penicillin" required>
+        <button type="submit" class="primary-btn">➕ Create Patient</button>
+      </form>
+    </div>
+
     <!-- Patient List -->
     <h2>Patients</h2>
-    <table>
-      <tr><th>ID</th><th>Name</th><th>Actions</th></tr>
-      <% patients.forEach(p => { %>
-        <tr>
-          <td><%= p.id %></td>
-          <td><%= p.full_name %></td>
-          <td><a href="/dashboard/<%= p.id %>">View Dashboard & Alerts</a></td>
-        </tr>
-      <% }); %>
-    </table>
+    <% if (patients.length === 0) { %>
+      <p>No patients yet. Use the form above to create one.</p>
+    <% } else { %>
+      <table>
+        <tr><th>ID</th><th>Name</th><th>Actions</th></tr>
+        <% patients.forEach(p => { %>
+          <tr>
+            <td><%= p.id %></td>
+            <td><%= p.full_name %></td>
+            <td><a href="/dashboard/<%= p.id %>">View Dashboard & Alerts</a></td>
+          </tr>
+        <% }); %>
+      </table>
+    <% } %>
 
     <!-- Dashboard Section (only show if dashboard exists) -->
     <% if (typeof dashboard !== 'undefined' && dashboard) { %>
-      <h2 class="section-title">Patient Dashboard: <%= dashboard.patient.full_name %></h2>
-      <p class="patient-id">Patient ID: <%= dashboard.patient.id %></p>
-      <div class="allergies">Allergies: <%= dashboard.patient.allergies.length ? dashboard.patient.allergies.join(', ') : 'None recorded' %></div>
+      <h2 class="section-title">Patient Dashboard: <%= patient.full_name %></h2>
+      <p class="patient-id">Patient ID: <%= patient.id %></p>
+      <div class="allergies">Allergies: <%= patient.allergies.length ? patient.allergies.join(', ') : 'None recorded' %></div>
 
-      <% if (dashboard.alerts.length > 0) { %>
-        <div class="alert-banner <%= dashboard.alerts.some(a=>a.risk==='High') ? 'high-risk':'medium-risk' %>">
+      <% if (alerts.length > 0) { %>
+        <div class="alert-banner <%= alerts.some(a=>a.risk==='High') ? 'high-risk':'medium-risk' %>">
           PHARMAVIGILANCE ALERT
         </div>
       <% } %>
 
-      <h3>Safety Alerts (<%= dashboard.alerts.length %>)</h3>
-      <% if (dashboard.alerts.length === 0) { %>
+      <h3>Safety Alerts (<%= alerts.length %>)</h3>
+      <% if (alerts.length === 0) { %>
         <div class="no-alerts">✅ No safety concerns detected. Patient is clear!</div>
       <% } else { %>
         <ul class="alert-list">
-          <% dashboard.alerts.forEach(a => { %>
+          <% alerts.forEach(a => { %>
             <li class="alert-item <%= a.risk.toLowerCase() %>">
               ⚠️ <%= a.type %>: <%= a.message %> (<strong>Risk: <%= a.risk %></strong>)
             </li>
@@ -80,8 +93,8 @@
       <h3>Current Medications</h3>
       <table>
         <tr><th>Medication</th><th>Dosage</th><th>Prescribed Date</th></tr>
-        <% if (dashboard.medications.length > 0) { %>
-          <% dashboard.medications.forEach(m => { %>
+        <% if (medications.length > 0) { %>
+          <% medications.forEach(m => { %>
             <tr>
               <td><%= m.name %></td>
               <td><%= m.dose || m.dosage || 'Standard' %></td>
@@ -96,8 +109,8 @@
       <h3>Recent Encounters</h3>
       <table>
         <tr><th>Date</th><th>Summary</th><th>Diagnosis</th></tr>
-        <% if (dashboard.encounters.length > 0) { %>
-          <% dashboard.encounters.forEach(e => { %>
+        <% if (encounters.length > 0) { %>
+          <% encounters.forEach(e => { %>
             <tr>
               <td><%= new Date(e.created_at).toLocaleDateString() %></td>
               <td><%= e.summary || 'Clinical consultation' %></td>
@@ -113,7 +126,7 @@
       <div class="form-section">
         <h3>Add Encounter / Prescription (AI Prompt)</h3>
         <form id="create-encounter-form">
-          <input type="hidden" name="patientId" value="<%= dashboard.patient.id %>">
+          <input type="hidden" name="patientId" value="<%= patient.id %>">
           <input type="text" name="prompt" placeholder="e.g., Patient has fever. Prescribe aspirin and amlodipine." required>
           <button type="submit" class="primary-btn">🚀 Add & Check Safety</button>
         </form>
@@ -127,6 +140,26 @@
   </div>
 
   <script>
+    // Create Patient
+    document.getElementById('create-patient-form')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const formData = new FormData(e.target);
+      const prompt = formData.get('prompt');
+      const res = await fetch('/create-patient', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ prompt })
+      });
+      const data = await res.json();
+      if(data.success){ 
+        alert('✅ Patient created!'); 
+        setTimeout(()=>location.reload(),800);
+      } else {
+        alert('❌ Error: ' + (data.error||'Unknown'));
+      }
+    });
+
+    // Create Encounter
     document.getElementById('create-encounter-form')?.addEventListener('submit', async (e) => {
       e.preventDefault();
       const formData = new FormData(e.target);
@@ -138,13 +171,19 @@
         body: JSON.stringify({ prompt, patientId })
       });
       const data = await res.json();
-      if(data.success){ alert('✅ Encounter added! Checking safety...'); setTimeout(()=>location.reload(),800);}
+      if(data.success){ 
+        alert('✅ Encounter added! Checking safety...');
+        setTimeout(()=>location.reload(),800);
+      } else {
+        alert('❌ Error: ' + (data.error||'Unknown'));
+      }
     });
 
+    // Register Webhook
     document.getElementById('register-webhook')?.addEventListener('click', async ()=>{
-      const res = await fetch('/register-webhook',{method:'POST'});
+      const res = await fetch('/webhook', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({ test:true }) });
       const data = await res.json();
-      alert(data.message || data.error || 'Webhook active!');
+      alert(data.received ? 'Webhook active!' : 'Error activating webhook');
     });
   </script>
 </body>
