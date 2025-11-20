@@ -30,7 +30,7 @@ async function apiCall(endpoint, method = 'GET', data = null) {
     const config = {
       method,
       url: `${BASE_URL}${endpoint}`,
-      headers: { Authorization: `Bearer ${API_TOKEN}` },
+      headers: { Authorization: `Token ${API_TOKEN}` },
       data
     };
     const response = await axios(config);
