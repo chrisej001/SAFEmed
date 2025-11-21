@@ -94,65 +94,54 @@ const mockResponseFor = (endpoint, method, data) => {
     };
     mockData.patients.push(created);
     return { status: true, status_code: 201, id: newId };
-if (endpoint === '/v1/ai/emr' && method === 'POST') {
-  const patientId = parseInt(data?.patient) || null;
-  const summary = (data?.prompt || '').substring(0, 140);
-  const created = { 
-    id: mockData.encounters.length + 1, 
-    created_at: new Date().toISOString(), 
-    summary, 
-    patient: patientId, 
-    diagnosis: 'Clinical consultation'
-  };
-
-  // Parse medications from prompt and add them — HACKATHON DEMO MODE
-  const promptLower = (data.prompt || '').toLowerCase();
-
-  if (promptLower.includes('amoxicillin') || promptLower.includes('amoxicilin')) {
-    mockData.medications.push({
-      id: mockData.nextMedicationId++,
-      name: 'Amoxicillin',
-      patient: patientId,
-      dose: '500mg',
-      created_at: new Date().toISOString()
-    });
   }
-
-  if (promptLower.includes('aspirin')) {
-    mockData.medications.push({
-      id: mockData.nextMedicationId++,
-      name: 'Aspirin',
-      patient: patientId,
-      dose: '300mg',
-      created_at: new Date().toISOString()
-    });
-    // Force deadly interaction for demo
-    mockData.medications.push({
-      id: mockData.nextMedicationId++,
-      name: 'Amlodipine',
-      patient: patientId,
-      dose: '5mg',
-      created_at: new Date().toISOString()
-    });
+  if (endpoint === '/v1/ai/emr' && method === 'POST') {
+    const patientId = parseInt(data?.patient) || null;
+    const summary = (data?.prompt || '').substring(0, 140);
+    const created = { 
+      id: mockData.encounters.length + 1, 
+      created_at: new Date().toISOString(), 
+      summary, 
+      patient: patientId, 
+      diagnosis: 'Clinical consultation'
+    };
+    
+    // Parse medications from prompt and add them
+    const promptLower = (data.prompt || '').toLowerCase();
+    if (promptLower.includes('aspirin')) {
+      mockData.medications.push({ 
+        id: mockData.nextMedicationId++,
+        name: 'Aspirin', 
+        patient: patientId,
+        dose: '500mg',
+        created_at: new Date().toISOString()
+      });
+    }
+    if (promptLower.includes('amlodipine')) {
+      mockData.medications.push({ 
+        id: mockData.nextMedicationId++,
+        name: 'Amlodipine', 
+        patient: patientId,
+        dose: '5mg',
+        created_at: new Date().toISOString()
+      });
+    }
+    if (promptLower.includes('amoxicillin')) {
+      mockData.medications.push({ 
+        id: mockData.nextMedicationId++,
+        name: 'Amoxicillin', 
+        patient: patientId,
+        dose: '250mg',
+        created_at: new Date().toISOString()
+      });
+    }
+    
+    mockData.encounters.push(created);
+    return { status: true, id: created.id };
   }
+  return {};
+};
 
-  if (promptLower.includes('paracetamol') || promptLower.includes('acetaminophen')) {
-    mockData.medications.push({
-      id: mockData.nextMedicationId++,
-      name: 'Paracetamol',
-      patient: patientId,
-      dose: '1g',
-      created_at: new Date().toISOString()
-    });
-  }
-
-  // Save the encounter to mock data
-  mockData.encounters.push(created);
-
-  // Return the created encounter
-  return created;
-} 
-   
 // Safe API call with better error handling
 const apiCall = async (endpoint, method='GET', data=null) => {
   if (MOCK_API) {
@@ -171,72 +160,57 @@ const apiCall = async (endpoint, method='GET', data=null) => {
   }
 };
 
-const computeAlerts = async (patientId, meds = [], patient = {}) => {
+// Compute alerts with improved medication matching
+const computeAlerts = async (patientId, meds=[], patient={}) => {
   const alerts = [];
-  const allergies = (patient.allergies || []).map(a => a.toLowerCase());
-  const medNames = meds.map(m => (m.name || '').toLowerCase());
-
+  const allergies = patient.allergies || [];
+  
   console.log(`[ALERT CHECK] Patient ${patientId}:`, {
     allergies,
-    medications: medNames
+    medications: meds.map(m => m.name)
   });
-
-  // GUARANTEED PENICILLIN ALLERGY ALERT (this is the #1 killer in Nigeria)
-  if (allergies.some(a => a.includes('penicillin'))) {
-    if (medNames.some(name => name.includes('amoxicillin') || name.includes('amoxicil') || name.includes('penicillin'))) {
-      alerts.push({
-        type: 'LIFE-THREATENING ALLERGY',
-        message: 'PATIENT IS ALLERGIC TO PENICILLIN! Amoxicillin is a penicillin-class drug — RISK OF ANAPHYLAXIS!',
-        risk: 'High'
-      });
-    }
-  }
-
-  // GUARANTEED ASPIRIN + AMLODIPINE ALERT (exact example from page 2 of the problem statement PDF)
-  const hasAspirin = medNames.some(name => name.includes('aspirin'));
-  const hasAmlodipine = medNames.some(name => name.includes('amlodipine'));
-
-  if (hasAspirin || hasAmlodipine) {
-    alerts.push({
-      type: 'MAJOR DRUG INTERACTION',
-      message: hasAspirin && hasAmlodipine 
-        ? 'ASPIRIN + AMLODIPINE DETECTED — This combination can increase blood pressure (exact example from problem statement)'
-        : 'Aspirin or Amlodipine prescribed — high risk if patient is on the other drug',
-      risk: 'High'
-    });
-  }
-
-  // Keep your original allergy check (backup)
+  
+  // Check for allergy risks
   allergies.forEach(allergy => {
     meds.forEach(med => {
       const medName = (med.name || '').toLowerCase();
       const allergyLower = allergy.toLowerCase();
+      // Check if medication name contains the allergy or vice versa
       if (medName.includes(allergyLower) || allergyLower.includes(medName.split(' ')[0])) {
-        alerts.push({
-          type: 'ALLERGY RISK',
-          message: `Patient is allergic to ${allergy}! Prescribed medication: ${med.name}`,
-          risk: 'High'
+        alerts.push({ 
+          type:'ALLERGY RISK', 
+          message:`Patient is allergic to ${allergy}! Prescribed medication: ${med.name}`, 
+          risk:'High' 
         });
       }
     });
   });
-
-  // Keep your original interaction check (backup for other combinations)
+  
+  // Check for drug interactions
   RISKY_COMBINATIONS.forEach(([drugA, drugB]) => {
-    const hasA = medNames.some(name => name.includes(drugA));
-    const hasB = medNames.some(name => name.includes(drugB));
+    const hasA = meds.some(m => {
+      const name = m.name.toLowerCase();
+      return name.includes(drugA) || drugA.includes(name.split(' ')[0]);
+    });
+    const hasB = meds.some(m => {
+      const name = m.name.toLowerCase();
+      return name.includes(drugB) || drugB.includes(name.split(' ')[0]);
+    });
+    
     if (hasA && hasB) {
-      alerts.push({
-        type: 'DRUG INTERACTION',
-        message: `${drugA.toUpperCase()} + ${drugB.toUpperCase()} = Serious interaction risk`,
-        risk: 'High'
+      alerts.push({ 
+        type:'DRUG INTERACTION', 
+        message:`${drugA.toUpperCase()} + ${drugB.toUpperCase()} = Serious interaction risk`, 
+        risk:'High' 
       });
     }
   });
-
+  
   console.log(`[ALERT RESULT] ${alerts.length} alerts detected`);
+  
   return alerts;
 };
+
 // Routes
 
 // Home - list patients
