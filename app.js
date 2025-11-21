@@ -178,7 +178,6 @@ const computeAlerts = async (patientId, meds = [], patient = {}) => {
   });
 
   // GUARANTEED PENICILLIN ALLERGY ALERT (this is the #1 killer in Nigeria)
- 2025)
   if (allergies.some(a => a.includes('penicillin'))) {
     if (medNames.some(name => name.includes('amoxicillin') || name.includes('amoxicil') || name.includes('penicillin'))) {
       alerts.push({
