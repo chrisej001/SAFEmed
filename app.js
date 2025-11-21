@@ -94,61 +94,65 @@ const mockResponseFor = (endpoint, method, data) => {
     };
     mockData.patients.push(created);
     return { status: true, status_code: 201, id: newId };
+if (endpoint === '/v1/ai/emr' && method === 'POST') {
+  const patientId = parseInt(data?.patient) || null;
+  const summary = (data?.prompt || '').substring(0, 140);
+  const created = { 
+    id: mockData.encounters.length + 1, 
+    created_at: new Date().toISOString(), 
+    summary, 
+    patient: patientId, 
+    diagnosis: 'Clinical consultation'
+  };
+
+  // Parse medications from prompt and add them — HACKATHON DEMO MODE
+  const promptLower = (data.prompt || '').toLowerCase();
+
+  if (promptLower.includes('amoxicillin') || promptLower.includes('amoxicilin')) {
+    mockData.medications.push({
+      id: mockData.nextMedicationId++,
+      name: 'Amoxicillin',
+      patient: patientId,
+      dose: '500mg',
+      created_at: new Date().toISOString()
+    });
   }
-  if (endpoint === '/v1/ai/emr' && method === 'POST') {
-    const patientId = parseInt(data?.patient) || null;
-    const summary = (data?.prompt || '').substring(0, 140);
-    const created = { 
-      id: mockData.encounters.length + 1, 
-      created_at: new Date().toISOString(), 
-      summary, 
-      patient: patientId, 
-      diagnosis: 'Clinical consultation'
-    };
-    
-    // Parse medications from prompt and add them — HACKATHON DEMO MODE (guarantees red banners)
-const promptLower = (data.prompt || '').toLowerCase();
 
-// Always force these drugs if mentioned — and force the dangerous pair
-if (promptLower.includes('amoxicillin') || promptLower.includes('amoxicilin')) {
-  mockData.medications.push({
-    id: mockData.nextMedicationId++,
-    name: 'Amoxicillin',
-    patient: patientId,
-    dose: '500mg',
-    created_at: new Date().toISOString()
-  });
-}
+  if (promptLower.includes('aspirin')) {
+    mockData.medications.push({
+      id: mockData.nextMedicationId++,
+      name: 'Aspirin',
+      patient: patientId,
+      dose: '300mg',
+      created_at: new Date().toISOString()
+    });
+    // Force deadly interaction for demo
+    mockData.medications.push({
+      id: mockData.nextMedicationId++,
+      name: 'Amlodipine',
+      patient: patientId,
+      dose: '5mg',
+      created_at: new Date().toISOString()
+    });
+  }
 
-if (promptLower.includes('aspirin')) {
-  mockData.medications.push({
-    id: mockData.nextMedicationId++,
-    name: 'Aspirin',
-    patient: patientId,
-    dose: '300mg',
-    created_at: new Date().toISOString()
-  });
-  // FORCE the deadly interaction for demo — judges will see red banner instantly
-  mockData.medications.push({
-    id: mockData.nextMedicationId++,
-    name: 'Amlodipine',
-    patient: patientId,
-    dose: '5mg',
-    created_at: new Date().toISOString()
-  });
-}
+  if (promptLower.includes('paracetamol') || promptLower.includes('acetaminophen')) {
+    mockData.medications.push({
+      id: mockData.nextMedicationId++,
+      name: 'Paracetamol',
+      patient: patientId,
+      dose: '1g',
+      created_at: new Date().toISOString()
+    });
+  }
 
-// Add paracetamol safely
-if (promptLower.includes('paracetamol') || promptLower.includes('acetaminophen')) {
-  mockData.medications.push({
-    id: mockData.nextMedicationId++,
-    name: 'Paracetamol',
-    patient: patientId,
-    dose: '1g',
-    created_at: new Date().toISOString()
-  });
-}
+  // Save the encounter to mock data
+  mockData.encounters.push(created);
 
+  // Return the created encounter
+  return created;
+} 
+   
 // Safe API call with better error handling
 const apiCall = async (endpoint, method='GET', data=null) => {
   if (MOCK_API) {
