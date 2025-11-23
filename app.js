@@ -44,6 +44,9 @@ let mockData = {
   nextMedicationId: 1
 };
 
+// Cache for patient names (helps when API doesn't return full_name)
+let patientNameCache = {};
+
 // Helper: auth headers
 const authHeaders = () => API_TOKEN ? { Authorization: `Token ${API_TOKEN}` } : {};
 
@@ -256,6 +259,14 @@ app.get('/', async (req, res) => {
   try {
     const patientsData = await apiCall('/v1/patients');
     const patients = patientsData.results || [];
+    
+    // Enhance patients with cached names if available
+    patients.forEach(p => {
+      if (!p.full_name && !p.first_name && patientNameCache[p.id]) {
+        p.full_name = patientNameCache[p.id];
+      }
+    });
+    
     res.render('index', { patients, dashboard: null });
   } catch (error) {
     console.error('[ERROR] Failed to fetch patients:', error.message);
@@ -294,15 +305,41 @@ app.post('/create-patient', async (req, res) => {
     const aiId = aiResp?.id || (aiResp?.status === true && aiResp?.id) || null;
     if (aiId) {
       console.log('[SUCCESS] Patient created via AI endpoint, ID:', aiId);
+      // Cache the patient name
+      patientNameCache[aiId] = extractedName;
       return res.json({ success: true, patientId: aiId });
     }
 
     console.log('[FALLBACK] AI create returned but no id, falling back to standard create');
 
     // 2) Attempt regular create endpoint as fallback
+    // Extract patient name from prompt (case-insensitive)
+    let extractedName = 'New Patient';
+    let firstName = 'New';
+    
+    const namePatterns = [
+      /(?:new patient|patient)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)+)/i, // "New patient John Doe"
+      /(?:create|add)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)+)/i,          // "Create John Doe"
+      /^([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)+)(?:,|\s)/i                   // "John Doe, ..." or "John Doe "
+    ];
+    
+    for (const pattern of namePatterns) {
+      const match = prompt.match(pattern);
+      if (match && match[1]) {
+        extractedName = match[1].trim();
+        // Remove any trailing words that aren't part of the name
+        extractedName = extractedName.split(/\s+(?:is|has|age|year|old|,)/i)[0].trim();
+        const nameParts = extractedName.split(/\s+/);
+        firstName = nameParts[0];
+        break;
+      }
+    }
+    
+    console.log('[NAME EXTRACTION]', { prompt, extractedName, firstName });
+    
     const derived = {
-      first_name: 'New',
-      full_name: prompt.substring(0, 200),
+      first_name: firstName,
+      full_name: extractedName,
       allergies: []
     };
 
@@ -311,19 +348,13 @@ app.post('/create-patient', async (req, res) => {
     if (allergyMatch) {
       const list = allergyMatch[1].split(',').map(s => s.trim()).filter(Boolean);
       if (list.length) derived.allergies = list;
-      
-      // Try to extract patient name
-      const nameMatch = prompt.match(/new patient\s+([A-Za-z\s]+)/i);
-      if (nameMatch) {
-        const fullName = nameMatch[1].trim();
-        derived.first_name = fullName.split(' ')[0] || 'New';
-        derived.full_name = fullName.substring(0, 200);
-      }
     }
 
     const stdId = await standardCreate(derived);
     if (stdId) {
       console.log('[SUCCESS] Patient created via standard endpoint, ID:', stdId);
+      // Cache the patient name
+      patientNameCache[stdId] = extractedName;
       return res.json({ success: true, patientId: stdId });
     }
 
@@ -376,6 +407,11 @@ app.get('/dashboard/:id', async (req, res) => {
         dashboard: null, 
         error: 'Patient not found' 
       });
+    }
+    
+    // Enhance patient with cached name if available
+    if (!patient.full_name && !patient.first_name && patientNameCache[id]) {
+      patient.full_name = patientNameCache[id];
     }
     
     const encounters = encountersData.results || [];
