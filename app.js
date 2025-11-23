@@ -301,10 +301,14 @@ app.post('/create-patient', async (req, res) => {
     let extractedName = 'New Patient';
     let firstName = 'New';
     
+    // Try multiple patterns - more specific to general
     const namePatterns = [
-      /(?:new patient|patient|create patient)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)/i, // "New patient John Doe" or "patient John Doe"
-      /^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)(?:\s+has|\s+is|\s+,)/i,                   // "Victor Daniel has cold"
-      /^([A-Z][a-z]+\s+[A-Z][a-z]+)/i                                              // Just "Victor Daniel"
+      // "Victor Daniel has cold" or "Victor Daniel is sick"
+      /^([A-Z][a-z]+\s+[A-Z][a-z]+)(?:\s+has|\s+is|\s+,)/i,
+      // "New patient Victor Daniel" or "patient Victor Daniel"  
+      /(?:new patient|patient|create patient)\s+([A-Z][a-z]+\s+[A-Z][a-z]+)/i,
+      // Just "Victor Daniel" at the start
+      /^([A-Z][a-z]+\s+[A-Z][a-z]+)/i
     ];
     
     for (const pattern of namePatterns) {
@@ -313,11 +317,27 @@ app.post('/create-patient', async (req, res) => {
         extractedName = match[1].trim();
         const nameParts = extractedName.split(/\s+/);
         firstName = nameParts[0];
+        console.log('[NAME MATCHED]', { pattern: pattern.toString(), matched: extractedName });
         break;
       }
     }
     
-    console.log('[NAME EXTRACTION]', { prompt, extractedName, firstName });
+    // If no name found, try to get any capitalized words at the start
+    if (extractedName === 'New Patient') {
+      const fallbackMatch = prompt.match(/^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/);
+      if (fallbackMatch) {
+        extractedName = fallbackMatch[1].trim();
+        firstName = extractedName.split(/\s+/)[0];
+        console.log('[NAME FALLBACK]', { matched: extractedName });
+      }
+    }
+    
+    console.log('[NAME EXTRACTION RESULT]', { 
+      prompt, 
+      extractedName, 
+      firstName,
+      willUseForAPI: extractedName !== 'New Patient'
+    });
 
     // Helper to call standard create (non-AI)
     const standardCreate = async (derived) => {
@@ -341,21 +361,23 @@ app.post('/create-patient', async (req, res) => {
       // Cache the patient name
       patientNameCache[aiId] = extractedName;
       
-      // Try to update the patient with the full name using the update endpoint
-      try {
-        await apiCall(`/v1/patients/${aiId}`, 'PATCH', { 
-          full_name: extractedName,
-          first_name: firstName 
-        });
-        console.log('[UPDATE] Patient name updated successfully');
-      } catch (updateError) {
-        console.log('[WARNING] Could not update patient name in API, but cached locally');
+      // If we extracted a name, try to update it via standard endpoint
+      if (extractedName !== 'New Patient' && firstName !== 'New') {
+        try {
+          const updateResp = await apiCall(`/v1/patients/${aiId}/update`, 'POST', { 
+            full_name: extractedName,
+            first_name: firstName 
+          });
+          console.log('[UPDATE] Attempted patient name update');
+        } catch (err) {
+          console.log('[WARNING] Could not update patient name, will use cache');
+        }
       }
       
       return res.json({ success: true, patientId: aiId });
     }
 
-    console.log('[FALLBACK] AI create returned but no id, falling back to standard create');
+    console.log('[FALLBACK] AI endpoint did not return ID, trying standard create');
 
     // 2) Attempt regular create endpoint as fallback
     const derived = {
@@ -473,7 +495,11 @@ app.post('/create-encounter', async (req, res) => {
     console.log(`[CREATE ENCOUNTER] Patient ${patientId}, prompt: ${prompt}`);
     
     // Create encounter via AI
-    await apiCall('/v1/ai/emr', 'POST', { patient: patientId, prompt });
+    const encounterResp = await apiCall('/v1/ai/emr', 'POST', { patient: patientId, prompt });
+    console.log(`[ENCOUNTER RESPONSE]`, encounterResp);
+    
+    // Wait a moment for the API to process
+    await new Promise(resolve => setTimeout(resolve, 500));
     
     // Fetch updated data
     const [patient, encountersData, medicationsData] = await Promise.all([
@@ -484,9 +510,12 @@ app.post('/create-encounter', async (req, res) => {
     
     const encounters = encountersData.results || [];
     const medications = medicationsData.results || [];
+    
+    console.log(`[DATA FETCHED] Encounters: ${encounters.length}, Medications: ${medications.length}`);
+    
     const alerts = await computeAlerts(patientId, medications, patient);
     
-    console.log(`[SUCCESS] Encounter created. Alerts: ${alerts.length}`);
+    console.log(`[SUCCESS] Encounter created. Encounters: ${encounters.length}, Medications: ${medications.length}, Alerts: ${alerts.length}`);
     
     res.json({ success: true, patient, encounters, medications, alerts });
   } catch (error) {
