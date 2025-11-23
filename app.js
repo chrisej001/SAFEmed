@@ -67,18 +67,27 @@ const mockResponseFor = (endpoint, method, data) => {
   }
   if (endpoint === '/v1/ai/patient' && method === 'POST') {
     const newId = mockData.patients.length + 1;
-    const prompt = (data?.prompt || '').toLowerCase();
+    const prompt = (data?.prompt || '');
     
-    // Extract patient name
+    // Extract patient name using the same logic as main app
     let fullName = `Patient ${newId}`;
-    const nameMatch = prompt.match(/new patient\s+([a-zA-Z\s]+?)(?:,|$)/i);
-    if (nameMatch) {
-      fullName = nameMatch[1].trim();
+    const namePatterns = [
+      /(?:new patient|patient|create patient)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)/i,
+      /^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)(?:\s+has|\s+is|\s+,)/i,
+      /^([A-Z][a-z]+\s+[A-Z][a-z]+)/i
+    ];
+    
+    for (const pattern of namePatterns) {
+      const match = prompt.match(pattern);
+      if (match && match[1]) {
+        fullName = match[1].trim();
+        break;
+      }
     }
     
     // Extract allergies
     const allergies = [];
-    const allergyMatch = prompt.match(/allergic to\s+([a-zA-Z\s,]+?)(?:\.|$)/i);
+    const allergyMatch = prompt.match(/allergic to\s+([a-zA-Z\s,]+?)(?:\.|,|$)/i);
     if (allergyMatch) {
       const allergyList = allergyMatch[1].split(',').map(a => a.trim()).filter(Boolean);
       allergies.push(...allergyList);
@@ -86,6 +95,7 @@ const mockResponseFor = (endpoint, method, data) => {
     
     const created = { id: newId, full_name: fullName, allergies };
     mockData.patients.push(created);
+    console.log('[MOCK] Created patient:', created);
     return { status: true, id: newId };
   }
   if (endpoint === '/v1/patients/create' && method === 'POST') {
@@ -287,6 +297,28 @@ app.post('/create-patient', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Prompt is required' });
     }
 
+    // Extract patient name from prompt (do this early for caching)
+    let extractedName = 'New Patient';
+    let firstName = 'New';
+    
+    const namePatterns = [
+      /(?:new patient|patient|create patient)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)/i, // "New patient John Doe" or "patient John Doe"
+      /^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)(?:\s+has|\s+is|\s+,)/i,                   // "Victor Daniel has cold"
+      /^([A-Z][a-z]+\s+[A-Z][a-z]+)/i                                              // Just "Victor Daniel"
+    ];
+    
+    for (const pattern of namePatterns) {
+      const match = prompt.match(pattern);
+      if (match && match[1]) {
+        extractedName = match[1].trim();
+        const nameParts = extractedName.split(/\s+/);
+        firstName = nameParts[0];
+        break;
+      }
+    }
+    
+    console.log('[NAME EXTRACTION]', { prompt, extractedName, firstName });
+
     // Helper to call standard create (non-AI)
     const standardCreate = async (derived) => {
       try {
@@ -305,38 +337,27 @@ app.post('/create-patient', async (req, res) => {
     const aiId = aiResp?.id || (aiResp?.status === true && aiResp?.id) || null;
     if (aiId) {
       console.log('[SUCCESS] Patient created via AI endpoint, ID:', aiId);
+      
       // Cache the patient name
       patientNameCache[aiId] = extractedName;
+      
+      // Try to update the patient with the full name using the update endpoint
+      try {
+        await apiCall(`/v1/patients/${aiId}`, 'PATCH', { 
+          full_name: extractedName,
+          first_name: firstName 
+        });
+        console.log('[UPDATE] Patient name updated successfully');
+      } catch (updateError) {
+        console.log('[WARNING] Could not update patient name in API, but cached locally');
+      }
+      
       return res.json({ success: true, patientId: aiId });
     }
 
     console.log('[FALLBACK] AI create returned but no id, falling back to standard create');
 
     // 2) Attempt regular create endpoint as fallback
-    // Extract patient name from prompt (case-insensitive)
-    let extractedName = 'New Patient';
-    let firstName = 'New';
-    
-    const namePatterns = [
-      /(?:new patient|patient)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)+)/i, // "New patient John Doe"
-      /(?:create|add)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)+)/i,          // "Create John Doe"
-      /^([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)+)(?:,|\s)/i                   // "John Doe, ..." or "John Doe "
-    ];
-    
-    for (const pattern of namePatterns) {
-      const match = prompt.match(pattern);
-      if (match && match[1]) {
-        extractedName = match[1].trim();
-        // Remove any trailing words that aren't part of the name
-        extractedName = extractedName.split(/\s+(?:is|has|age|year|old|,)/i)[0].trim();
-        const nameParts = extractedName.split(/\s+/);
-        firstName = nameParts[0];
-        break;
-      }
-    }
-    
-    console.log('[NAME EXTRACTION]', { prompt, extractedName, firstName });
-    
     const derived = {
       first_name: firstName,
       full_name: extractedName,
