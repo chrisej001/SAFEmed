@@ -97,44 +97,61 @@ const mockResponseFor = (endpoint, method, data) => {
   }
   if (endpoint === '/v1/ai/emr' && method === 'POST') {
     const patientId = parseInt(data?.patient) || null;
-    const summary = (data?.prompt || '').substring(0, 140);
+    const prompt = data?.prompt || '';
+    const summary = prompt.substring(0, 140);
+    
+    // Extract diagnosis from prompt
+    let diagnosis = 'Clinical consultation';
+    const diagnosisPatterns = [
+      /(?:has|diagnosed with|suffering from|complains of)\s+([a-zA-Z\s,]+?)(?:\.|,|\s+prescribe|\s+bp:|$)/i,
+      /diagnosis[:\s]+([a-zA-Z\s]+?)(?:\.|,|$)/i,
+      /(?:fever|headache|infection|hypertension|diabetes|cough|cold|pain)/i
+    ];
+    
+    for (const pattern of diagnosisPatterns) {
+      const match = prompt.match(pattern);
+      if (match) {
+        if (match[1]) {
+          diagnosis = match[1].trim();
+        } else {
+          diagnosis = match[0];
+        }
+        break;
+      }
+    }
+    
     const created = { 
       id: mockData.encounters.length + 1, 
       created_at: new Date().toISOString(), 
       summary, 
       patient: patientId, 
-      diagnosis: 'Clinical consultation'
+      diagnosis
     };
     
     // Parse medications from prompt and add them
-    const promptLower = (data.prompt || '').toLowerCase();
-    if (promptLower.includes('aspirin')) {
-      mockData.medications.push({ 
-        id: mockData.nextMedicationId++,
-        name: 'Aspirin', 
-        patient: patientId,
-        dose: '500mg',
-        created_at: new Date().toISOString()
-      });
-    }
-    if (promptLower.includes('amlodipine')) {
-      mockData.medications.push({ 
-        id: mockData.nextMedicationId++,
-        name: 'Amlodipine', 
-        patient: patientId,
-        dose: '5mg',
-        created_at: new Date().toISOString()
-      });
-    }
-    if (promptLower.includes('amoxicillin')) {
-      mockData.medications.push({ 
-        id: mockData.nextMedicationId++,
-        name: 'Amoxicillin', 
-        patient: patientId,
-        dose: '250mg',
-        created_at: new Date().toISOString()
-      });
-    }
+    const promptLower = prompt.toLowerCase();
+    const medications = [
+      { keyword: 'aspirin', name: 'Aspirin', dose: '500mg' },
+      { keyword: 'amlodipine', name: 'Amlodipine', dose: '5mg' },
+      { keyword: 'amoxicillin', name: 'Amoxicillin', dose: '250mg' },
+      { keyword: 'penicillin', name: 'Penicillin', dose: '500mg' },
+      { keyword: 'ibuprofen', name: 'Ibuprofen', dose: '400mg' },
+      { keyword: 'warfarin', name: 'Warfarin', dose: '5mg' },
+      { keyword: 'paracetamol', name: 'Paracetamol', dose: '500mg' },
+      { keyword: 'codeine', name: 'Codeine', dose: '30mg' }
+    ];
+    
+    medications.forEach(med => {
+      if (promptLower.includes(med.keyword)) {
+        mockData.medications.push({ 
+          id: mockData.nextMedicationId++,
+          name: med.name, 
+          patient: patientId,
+          dose: med.dose,
+          created_at: new Date().toISOString()
+        });
+      }
+    });
     
     mockData.encounters.push(created);
     return { status: true, id: created.id };
@@ -160,6 +177,13 @@ const apiCall = async (endpoint, method='GET', data=null) => {
   }
 };
 
+// High-risk medications that require monitoring even when used alone
+const HIGH_RISK_MEDICATIONS = [
+  { name: 'warfarin', warning: 'Warfarin requires regular blood monitoring (INR levels). Risk of bleeding.' },
+  { name: 'codeine', warning: 'Codeine is an opioid. Monitor for respiratory depression and dependence risk.' },
+  { name: 'amoxicillin', warning: 'Amoxicillin - verify no penicillin allergy before administration.' }
+];
+
 // Compute alerts with improved medication matching
 const computeAlerts = async (patientId, meds=[], patient={}) => {
   const alerts = [];
@@ -181,6 +205,20 @@ const computeAlerts = async (patientId, meds=[], patient={}) => {
           type:'ALLERGY RISK', 
           message:`Patient is allergic to ${allergy}! Prescribed medication: ${med.name}`, 
           risk:'High' 
+        });
+      }
+    });
+  });
+  
+  // Check for high-risk single medications
+  meds.forEach(med => {
+    const medName = (med.name || '').toLowerCase();
+    HIGH_RISK_MEDICATIONS.forEach(highRisk => {
+      if (medName.includes(highRisk.name)) {
+        alerts.push({
+          type: 'PHARMAVIGILANCE ALERT',
+          message: highRisk.warning,
+          risk: 'High'
         });
       }
     });
