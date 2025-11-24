@@ -301,31 +301,35 @@ app.post('/create-patient', async (req, res) => {
     let extractedName = 'New Patient';
     let firstName = 'New';
     
-    // Try multiple patterns - more specific to general
+    // Try multiple patterns - IMPORTANT: Check specific patterns before general ones
     const namePatterns = [
-      // "Victor Daniel has cold" or "Victor Daniel is sick"
-      /^([A-Z][a-z]+\s+[A-Z][a-z]+)(?:\s+has|\s+is|\s+,)/i,
-      // "New patient Victor Daniel" or "patient Victor Daniel"  
-      /(?:new patient|patient|create patient)\s+([A-Z][a-z]+\s+[A-Z][a-z]+)/i,
-      // Just "Victor Daniel" at the start
-      /^([A-Z][a-z]+\s+[A-Z][a-z]+)/i
+      // Pattern 1: "New patient John Doe" or "patient John Doe" - check FIRST to avoid matching "New patient" as a name
+      { regex: /(?:new patient|patient|create patient)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/i, desc: 'keyword + name' },
+      // Pattern 2: "Victor Daniel has cold" or "Victor Daniel, allergic to..." - name followed by description
+      { regex: /^([A-Z][a-z]+\s+[A-Z][a-z]+)(?:\s+has|\s+is|\s+,|\s+with)/i, desc: 'name + action' },
+      // Pattern 3: Just "Victor Daniel" at the start (but not if it's "New Patient" etc)
+      { regex: /^([A-Z][a-z]+\s+[A-Z][a-z]+)/, desc: 'name at start' }
     ];
     
-    for (const pattern of namePatterns) {
-      const match = prompt.match(pattern);
+    for (const { regex, desc } of namePatterns) {
+      const match = prompt.match(regex);
       if (match && match[1]) {
-        extractedName = match[1].trim();
-        const nameParts = extractedName.split(/\s+/);
-        firstName = nameParts[0];
-        console.log('[NAME MATCHED]', { pattern: pattern.toString(), matched: extractedName });
-        break;
+        const candidate = match[1].trim();
+        // Skip if it's just keywords like "New Patient"
+        if (!candidate.match(/^(New Patient|New patient|Patient)$/i)) {
+          extractedName = candidate;
+          const nameParts = extractedName.split(/\s+/);
+          firstName = nameParts[0];
+          console.log('[NAME MATCHED]', { pattern: desc, matched: extractedName });
+          break;
+        }
       }
     }
     
-    // If no name found, try to get any capitalized words at the start
+    // Fallback: try to find any capitalized name (single or double)
     if (extractedName === 'New Patient') {
-      const fallbackMatch = prompt.match(/^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/);
-      if (fallbackMatch) {
+      const fallbackMatch = prompt.match(/\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b/);
+      if (fallbackMatch && !fallbackMatch[1].match(/^(New|Patient|Create)$/i)) {
         extractedName = fallbackMatch[1].trim();
         firstName = extractedName.split(/\s+/)[0];
         console.log('[NAME FALLBACK]', { matched: extractedName });
